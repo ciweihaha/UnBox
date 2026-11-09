@@ -288,10 +288,11 @@ func (p *mpvProc) send(args ...any) error {
 	p.sendMu.Lock()
 	defer p.sendMu.Unlock()
 
-	// 快照当前 conn 与会话代际；并发 Close 只关掉旧 conn，此处 Write 返回
+	// 快照当前 conn、收尸器与会话代际；并发 Close 只关掉旧 conn，此处 Write 返回
 	// error 而非 nil-deref。不持锁等应答。
 	p.lifecycleMu.Lock()
 	c := p.conn
+	w := p.wait
 	sess := p.session
 	p.lifecycleMu.Unlock()
 	if c == nil {
@@ -319,43 +320,19 @@ func (p *mpvProc) send(args ...any) error {
 				return errors.New(resp.Error)
 			}
 			return nil
+		case <-w.exited():
+			// 进程已退出：readLoop 随连接 EOF 结束，再也不会有应答，等满
+			// cmdResponseTimeout（15s）没有意义，立刻失败让自动换源尽快接手。
+			// w 为 nil 时 exited() 返回 nil 通道，本分支永不就绪。
+			stderr := p.teardownSessionIfSame(c)
+			err := errors.New("mpvproc: mpv 已退出")
+			if stderr != nil {
+				err = mpvLoadError(err, stderr.String())
+			}
+			return err
 		case <-timer.C:
-			// 超时视为本会话连接已坏。仅在 p.conn 仍是自己写入的那条（指针同一）
-			// 时才拆解，否则说明 Load 已重入建立新会话，不得误杀后继。
-			p.lifecycleMu.Lock()
-			same := p.conn == c
-			stderr := p.stderr // 会话可能在 Load 里被换掉，锁内取快照
-			var conn io.ReadWriteCloser
-			var cmd *exec.Cmd
-			var w *waiter
-			var ipcPath string
-			if same {
-				conn = p.conn
-				cmd = p.cmd
-				w = p.wait
-				ipcPath = p.ipcPath
-				p.conn = nil
-				p.cmd = nil
-				p.wait = nil
-				p.ipcPath = ""
-			}
-			p.lifecycleMu.Unlock()
-
-			if same {
-				if conn != nil {
-					_ = conn.Close()
-				}
-				if cmd != nil && cmd.Process != nil {
-					_ = cmd.Process.Kill()
-				}
-				_ = w.wait()
-				if ipcPath != "" {
-					cleanupIPC(ipcPath)
-				}
-				p.stateMu.Lock()
-				p.state.Playing = player.StateStopped
-				p.stateMu.Unlock()
-			}
+			// 超时视为本会话连接已坏，拆解会话。
+			stderr := p.teardownSessionIfSame(c)
 			err := errors.New("mpvproc: 命令应答超时")
 			if stderr != nil {
 				// 附上 mpv 自己吐的 stderr 尾部：网络失败的原因基本都在里面。
@@ -364,6 +341,47 @@ func (p *mpvProc) send(args ...any) error {
 			return err
 		}
 	}
+}
+
+// teardownSessionIfSame 拆解已坏的会话（应答超时 / 进程退出）：仅在 p.conn
+// 仍是调用方写入的那条（指针同一）时才动手，否则说明 Load 已重入建立新
+// 会话，不得误杀后继。返回被拆解会话的 stderr 尾部（供报错附带）。
+func (p *mpvProc) teardownSessionIfSame(c io.ReadWriteCloser) *stderrTail {
+	p.lifecycleMu.Lock()
+	same := p.conn == c
+	stderr := p.stderr // 会话可能在 Load 里被换掉，锁内取快照
+	var conn io.ReadWriteCloser
+	var cmd *exec.Cmd
+	var w *waiter
+	var ipcPath string
+	if same {
+		conn = p.conn
+		cmd = p.cmd
+		w = p.wait
+		ipcPath = p.ipcPath
+		p.conn = nil
+		p.cmd = nil
+		p.wait = nil
+		p.ipcPath = ""
+	}
+	p.lifecycleMu.Unlock()
+
+	if same {
+		if conn != nil {
+			_ = conn.Close()
+		}
+		if cmd != nil && cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = w.wait()
+		if ipcPath != "" {
+			cleanupIPC(ipcPath)
+		}
+		p.stateMu.Lock()
+		p.state.Playing = player.StateStopped
+		p.stateMu.Unlock()
+	}
+	return stderr
 }
 
 // readLoop 是连接上唯一的读取者。mpv 连接建立后不会主动发握手行，命令

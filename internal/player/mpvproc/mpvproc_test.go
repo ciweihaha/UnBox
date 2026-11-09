@@ -33,6 +33,37 @@ func TestSendTimeoutCarriesMpvStderr(t *testing.T) {
 	}
 }
 
+// mpv 崩溃后，send 不应再等满命令应答超时（15s）：进程已退出意味着
+// readLoop 随连接 EOF 结束、再也不会有应答，立刻报错才能让自动换源
+// 尽快接手。
+func TestSendFailsFastWhenMpvExited(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	p := &mpvProc{
+		responses: make(chan response, 16),
+		conn:      unresponsiveConn{},
+		session:   1,
+		wait:      &waiter{done: done},
+	}
+	p.stderr = &stderrTail{max: 1024}
+	_, _ = p.stderr.Write([]byte("mpv crashed"))
+
+	oldTimeout := cmdResponseTimeout
+	cmdResponseTimeout = 5 * time.Second
+	defer func() { cmdResponseTimeout = oldTimeout }()
+
+	start := time.Now()
+	err := p.send("set_property", "pause", true)
+	elapsed := time.Since(start)
+
+	if err == nil || !strings.Contains(err.Error(), "mpv 已退出") {
+		t.Fatalf("mpv 已退出时 send 应立即报错，got %v", err)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("耗时 %v，应在进程退出后立即返回而不是等满超时", elapsed)
+	}
+}
+
 // unresponsiveConn 是「写得进、永远不应答」的假连接，用来触发命令应答超时。
 type unresponsiveConn struct{}
 
