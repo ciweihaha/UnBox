@@ -231,9 +231,7 @@ func (e *Engine) installHelpers() {
 		// 额外参数（setInterval(fn, ms, a, b) 里的 a、b）按浏览器顺序先传，
 		// 本次 interval 的 id 追加在最后，供回调内 clearInterval 自我取消。
 		args := make([]goja.Value, 0, len(call.Arguments)-2+1)
-		for _, a := range call.Arguments[2:] {
-			args = append(args, a)
-		}
+		args = append(args, call.Arguments[2:]...)
 		args = append(args, e.vm.ToValue(id))
 		start := time.Now()
 		for i := 0; i < maxIntervalCallbacks; i++ {

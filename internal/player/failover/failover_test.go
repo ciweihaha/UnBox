@@ -11,10 +11,9 @@ import (
 
 // fakePlayer 是一个可编程的 inner Player，用于驱动事件。
 type fakePlayer struct {
-	mu      sync.Mutex
-	loaded  []string
-	events  chan player.Event
-	playErr error
+	mu     sync.Mutex
+	loaded []string
+	events chan player.Event
 }
 
 func newFakePlayer() *fakePlayer {

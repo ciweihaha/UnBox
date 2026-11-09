@@ -13,15 +13,6 @@ import (
 	"github.com/unbox/unbox/internal/player"
 )
 
-type fakeResolver struct{ stream player.Stream }
-
-func (f fakeResolver) Resolve(context.Context, player.Stream) (player.Stream, error) {
-	if f.stream.URL == "" {
-		return player.Stream{}, nil
-	}
-	return f.stream, nil
-}
-
 type fakeProxy struct {
 	next     int
 	released []string

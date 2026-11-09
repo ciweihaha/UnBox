@@ -50,26 +50,6 @@ func xpathExtractFirst(doc *goquery.Document, rule string) []string {
 	return xpathMapText(base)
 }
 
-// xpathSelectNodes 执行 xpath 并停在最后的节点步，返回命中节点集合
-// （供数组规则使用）。含 text()/@attr 取值步时返回 nil。
-func xpathSelectNodes(doc *goquery.Document, rule string) *goquery.Selection {
-	if strings.TrimSpace(rule) == "" {
-		return nil
-	}
-	steps, lastTake := xpathSplitSteps(rule)
-	if lastTake != "" {
-		return nil
-	}
-	base := doc.Selection
-	for _, step := range steps {
-		base = xpathApplyStep(base, step)
-		if base == nil || base.Length() == 0 {
-			return nil
-		}
-	}
-	return base
-}
-
 func xpathApplyStep(base *goquery.Selection, step string) *goquery.Selection {
 	nodes, index := xpathStepSelector(step)
 	next := base.Find(nodes)
