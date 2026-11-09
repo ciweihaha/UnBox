@@ -40,8 +40,9 @@ type Engine struct {
 	siteType int
 	// ctx 是本次调用的上下文（全站搜索用它给单站点限时）；JS 里的 req/http
 	// 都带它跑，否则一个连不上的站点会按自己的 15s 超时拖住线程几分钟。
-	// 由 ctxMu 守护：同一站点的搜索与详情可能并发（详情页预热、搜索重入），
-	// 裸读会让一次请求拿到别人那次调用的 ctx，被别人结束时的 cancel 殃及。
+	// 由 ctxMu 守护。调用方（Spider）只在持 Spider.mu 执行 JS 期间绑定它：
+	// SetContext 若在锁外调用，并发的另一次调用会改掉它，让执行中的 req()
+	// 读到别人的 ctx——别人结束时一 cancel，本次请求就跟着失败。
 	ctxMu sync.RWMutex
 	ctx   context.Context
 	// nextIntervalID / intervals 是 setInterval shim 的状态：自增 id 与
@@ -54,6 +55,8 @@ type Engine struct {
 
 // SetContext 绑定本次调用的上下文（搜索/详情等）。JS 里的 req 请求会携带它，
 // 上层可以借用它给单个站点限时（siteSearchTimeout）。
+// 调用方必须保证 SetContext 与本次 JS 执行串行（Spider 在持 mu 期间调用）：
+// 锁外调用会让并发的另一次调用改掉它，执行中的 req() 就会读到别人的 ctx。
 func (e *Engine) SetContext(ctx context.Context) {
 	e.ctxMu.Lock()
 	e.ctx = ctx

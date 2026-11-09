@@ -99,6 +99,9 @@ func isDrpyEngineLib(raw string) bool {
 func (p *Spider) ensureLoaded(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// 加载脚本也可能执行顶层 JS（含 req），本次调用的 ctx 必须在持锁期间绑定，
+	// 否则并发调用会让加载读到别人那次调用的 ctx。
+	p.engine.SetContext(ctx)
 	if p.loaded {
 		return p.loadErr
 	}
@@ -108,12 +111,14 @@ func (p *Spider) ensureLoaded(ctx context.Context) error {
 }
 
 func (p *Spider) Home(ctx context.Context) ([]provider.Section, error) {
-	p.engine.SetContext(ctx)
 	if err := p.ensureLoaded(ctx); err != nil {
 		return nil, err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// ctx 必须在持锁期间绑定：SetContext 在锁外时，并发的另一次调用会改掉它，
+	// 让执行中的 req() 读到别人的 ctx（别人结束时一 cancel，本次请求就跟着失败）。
+	p.engine.SetContext(ctx)
 	if err := p.engine.Init(); err != nil {
 		return nil, err
 	}
@@ -214,12 +219,12 @@ func (p *Spider) Browse(ctx context.Context, cat string, page int) (provider.Pag
 }
 
 func (p *Spider) BrowseFiltered(ctx context.Context, cat string, page int, filters map[string]string) (provider.Page, error) {
-	p.engine.SetContext(ctx)
 	if err := p.ensureLoaded(ctx); err != nil {
 		return provider.Page{}, err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.engine.SetContext(ctx)
 	if err := p.engine.Init(); err != nil {
 		return provider.Page{}, err
 	}
@@ -231,12 +236,12 @@ func (p *Spider) BrowseFiltered(ctx context.Context, cat string, page int, filte
 }
 
 func (p *Spider) Search(ctx context.Context, q string) ([]provider.Item, error) {
-	p.engine.SetContext(ctx)
 	if err := p.ensureLoaded(ctx); err != nil {
 		return nil, err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.engine.SetContext(ctx)
 	if err := p.engine.Init(); err != nil {
 		return nil, err
 	}
@@ -248,12 +253,12 @@ func (p *Spider) Search(ctx context.Context, q string) ([]provider.Item, error) 
 }
 
 func (p *Spider) Detail(ctx context.Context, id string) (provider.Media, error) {
-	p.engine.SetContext(ctx)
 	if err := p.ensureLoaded(ctx); err != nil {
 		return provider.Media{}, err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.engine.SetContext(ctx)
 	if err := p.engine.Init(); err != nil {
 		return provider.Media{}, err
 	}
@@ -296,6 +301,9 @@ func (p *Spider) Resolve(ctx context.Context, epID string) (player.Stream, error
 		}
 	}
 	p.mu.Lock()
+	// Resolve 此前完全不调 SetContext：VodPlay 里 JS 的 req() 用的是上次调用
+	// 残留的 ctx，可能是已取消的搜索 ctx；本次的 ctx 必须在持锁期间绑定。
+	p.engine.SetContext(ctx)
 	playURL, err := p.engine.VodPlay(episode.Source, episode.URL)
 	p.mu.Unlock()
 	if err == nil && strings.TrimSpace(playURL) != "" {
