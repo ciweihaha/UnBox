@@ -2384,11 +2384,11 @@ onBeforeUnmount(() => {
           <button @click="showOpenSource = false">✕</button>
         </div>
         <ul class="oss-list">
-          <li><a href="https://github.com/wailsapp/wails" target="_blank" rel="noopener">Wails</a><span class="oss-ver">v3.0.0</span><span class="oss-lic">MIT</span> — 桌面应用框架</li>
-          <li><a href="https://gitlab.com/cznic/sqlite" target="_blank" rel="noopener">modernc.org/sqlite</a><span class="oss-ver">v1.61.0</span><span class="oss-lic">BSD-3</span> — 纯 Go SQLite</li>
+          <li><a href="https://github.com/wailsapp/wails" target="_blank" rel="noopener">Wails</a><span class="oss-ver">v3.1.0</span><span class="oss-lic">MIT</span> — 桌面应用框架</li>
+          <li><a href="https://gitlab.com/cznic/sqlite" target="_blank" rel="noopener">modernc.org/sqlite</a><span class="oss-ver">v1.62.0</span><span class="oss-lic">BSD-3</span> — 纯 Go SQLite</li>
           <li><a href="https://github.com/PuerkitoBio/goquery" target="_blank" rel="noopener">goquery</a><span class="oss-ver">v1.13.0</span><span class="oss-lic">BSD-3</span> — HTML 文档解析</li>
-          <li><a href="https://github.com/dop251/goja" target="_blank" rel="noopener">goja</a><span class="oss-ver">2026-10-29</span><span class="oss-lic">MIT</span> — Go JavaScript 引擎</li>
-          <li><a href="https://github.com/vuejs/core" target="_blank" rel="noopener">Vue</a><span class="oss-ver">v3.5.44</span><span class="oss-lic">MIT</span> — 前端框架</li>
+          <li><a href="https://github.com/dop251/goja" target="_blank" rel="noopener">goja</a><span class="oss-ver">2026-11-08</span><span class="oss-lic">MIT</span> — Go JavaScript 引擎</li>
+          <li><a href="https://github.com/vuejs/core" target="_blank" rel="noopener">Vue</a><span class="oss-ver">v3.5.45</span><span class="oss-lic">MIT</span> — 前端框架</li>
           <li><a href="https://github.com/video-dev/hls.js" target="_blank" rel="noopener">hls.js</a><span class="oss-ver">v1.7.4</span><span class="oss-lic">Apache-2.0</span> — HLS 播放</li>
           <li><a href="https://github.com/xqq/mpegts.js" target="_blank" rel="noopener">mpegts.js</a><span class="oss-ver">v1.8.2</span><span class="oss-lic">MIT</span> — MPEG-TS / FLV 播放</li>
           <li><a href="https://github.com/cure53/DOMPurify" target="_blank" rel="noopener">DOMPurify</a><span class="oss-ver">v3.4.17</span><span class="oss-lic">Apache-2.0</span> — HTML 清洗</li>
