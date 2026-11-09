@@ -170,8 +170,8 @@ Release 挂载产物。
   不使用内嵌 JVM/ART，也不执行下载的 JAR。
 - `.js` 爬虫：FongMi js0、drpy2（`var rule`，Provider 加载 `ext`）与 ES Module
   已支持，`cat.js` / `gbk.js` 走自有 shim（不内置 GPL 资源），drpy2 的
-  `fyfilter`/`filter_url` 与筛选 UI 均已打通。仍有限制：脚本若依赖
-  `setInterval` 仍会失败（已注入同步 `setTimeout` 与 no-op `clearTimeout`）；
+  `fyfilter`/`filter_url` 与筛选 UI 均已打通。仍有限制：已注入同步
+  `setInterval`/`setTimeout`（`clearInterval` 可取消，单次调用有次数与总耗时上限）；
   上游未声明许可证的 `模板.js` 不随包分发。真实站点验收明细见
   `docs/2026-10-17-m7-acceptance.md`。
 - 规则站给出的线路若指向平台播放页（B站 / 腾讯视频 / 爱奇艺 / 优酷 / 芒果 / 搜狐 /

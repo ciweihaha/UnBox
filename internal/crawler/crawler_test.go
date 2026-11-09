@@ -260,3 +260,118 @@ func TestSetTimeoutShim(t *testing.T) {
 		t.Fatalf("clearTimeout = %v, %v", v, err)
 	}
 }
+
+// setInterval 与 setTimeout 同样走同步执行：回调在 setInterval 返回前按
+// 间隔循环执行；回调收到的第一个参数是本次 interval 的 id（见 helpers.go
+// 的说明），便于回调内 clearInterval 自我取消——同步模型下 `var id =
+// setInterval(...)` 里的 id 在首次回调时还未赋值，不靠这个参数就清不掉。
+func TestSetIntervalShim(t *testing.T) {
+	e := New()
+	src := `function probe(){
+  var x = 0;
+  var id = setInterval(function(timerId){ x++; if (x >= 3) { clearInterval(timerId); } }, 0);
+  return x;
+}`
+	if err := e.Load(src); err != nil {
+		t.Fatal(err)
+	}
+	v, err := e.Call("probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.String() != "3" {
+		t.Fatalf("setInterval 应执行 3 次后被取消，实际: %q", v.String())
+	}
+}
+
+// 两次 setInterval 应返回不同的 id；非函数首参应返回 0（与 setTimeout 一致）。
+func TestSetIntervalReturnsDistinctIDs(t *testing.T) {
+	e := New()
+	src := `function probe(){
+  var a = setInterval(function(id){ clearInterval(id); }, 0);
+  var b = setInterval(function(id){ clearInterval(id); }, 0);
+  var c = setInterval("not a function", 0);
+  return a + "," + b + "," + c;
+}`
+	if err := e.Load(src); err != nil {
+		t.Fatal(err)
+	}
+	v, err := e.Call("probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(v.String(), ",")
+	if len(parts) != 3 || parts[0] == parts[1] || parts[0] == "0" || parts[1] == "0" || parts[2] != "0" {
+		t.Fatalf("setInterval 返回的 id 应互不相同且非零、非函数返回 0，实际: %q", v.String())
+	}
+}
+
+// clearInterval 对不存在、已取消、未传参的 id 不报错（no-op）。
+func TestClearIntervalUnknownIDIsNoOp(t *testing.T) {
+	e := New()
+	src := `function probe(){
+  clearInterval(999);
+  clearInterval(0);
+  clearInterval();
+  clearInterval(undefined);
+  var id = setInterval(function(timerId){ clearInterval(timerId); }, 0);
+  clearInterval(id);
+  return "ok";
+}`
+	if err := e.Load(src); err != nil {
+		t.Fatal(err)
+	}
+	v, err := e.Call("probe")
+	if err != nil || v.String() != "ok" {
+		t.Fatalf("clearInterval 未知 id 应为 no-op，实际: %v, %v", v, err)
+	}
+}
+
+// 从不清的 setInterval 必须在次数上限处停下，不能死循环；停下时记日志。
+func TestSetIntervalCallbackCap(t *testing.T) {
+	buf := captureLog(t)
+	e := New()
+	src := `function probe(){
+  var x = 0;
+  setInterval(function(){ x++; }, 0);
+  return x;
+}`
+	if err := e.Load(src); err != nil {
+		t.Fatal(err)
+	}
+	v, err := e.Call("probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.String() != "100" {
+		t.Fatalf("不清的 setInterval 应在 100 次回调后停下，实际: %q", v.String())
+	}
+	if !strings.Contains(buf.String(), "setInterval") || !strings.Contains(buf.String(), "上限") {
+		t.Fatalf("达上限停下时应记日志，实际: %q", buf.String())
+	}
+}
+
+// setInterval 回调抛错应记日志且不中断后续执行（与 setTimeout 一致）。
+func TestSetIntervalCallbackErrorLogged(t *testing.T) {
+	buf := captureLog(t)
+	e := New()
+	src := `function probe(){
+  var x = 0;
+  setInterval(function(id){
+    x++;
+    if (x === 1) { throw new Error("boom"); }
+    if (x >= 3) { clearInterval(id); }
+  }, 0);
+  return x;
+}`
+	if err := e.Load(src); err != nil {
+		t.Fatal(err)
+	}
+	v, err := e.Call("probe")
+	if err != nil || v.String() != "3" {
+		t.Fatalf("probe = %v, %v", v, err)
+	}
+	if !strings.Contains(buf.String(), "setInterval") || !strings.Contains(buf.String(), "boom") {
+		t.Fatalf("setInterval 回调错误未记录: %q", buf.String())
+	}
+}

@@ -13,6 +13,20 @@ import (
 	"github.com/dop251/goja"
 )
 
+const (
+	// maxTimerDelay 是单次定时等待的上限（setTimeout 的既有上限，
+	// setInterval 的每轮等待同样遵守），避免脚本用超大间隔卡死引擎。
+	maxTimerDelay = 1000 * time.Millisecond
+	// maxIntervalCallbacks 是单次 setInterval 调用内回调的最多执行次数。
+	// 同步 shim 下不清的 interval 会无限循环，100 次足够覆盖真实轮询
+	// 用法（通常几轮内清掉），又把单次调用的最坏耗时压在总时长上限内。
+	maxIntervalCallbacks = 100
+	// maxIntervalTotal 是单次 setInterval 调用的总耗时上限。次数上限在
+	// 大间隔下仍可能拖很久（100 次 × 1000ms），总上限防止它拖垮单站点
+	// 限时（siteSearchTimeout 12s）。
+	maxIntervalTotal = 10 * time.Second
+)
+
 func (e *Engine) installHelpers() {
 	_ = e.vm.Set("log", func(call goja.FunctionCall) goja.Value {
 		args := make([]any, len(call.Arguments))
@@ -179,6 +193,72 @@ func (e *Engine) installHelpers() {
 	})
 	// clearTimeout 为 no-op：同步 shim 的回调在返回前就已执行完，无待取消的定时器。
 	_ = e.vm.Set("clearTimeout", func(call goja.FunctionCall) goja.Value {
+		return goja.Undefined()
+	})
+	// setInterval / clearInterval shim：与 setTimeout 同样走同步执行——goja
+	// 无定时器全局，且 Runtime 不能跨 goroutine 调用，回调只能在 setInterval
+	// 返回前按间隔循环执行。返回自增 id；clearInterval(id) 取消后续执行，
+	// 对不存在/已取消的 id 不报错。回调抛错只记日志，不中断后续执行（与
+	// setTimeout 一致）。
+	//
+	// 与浏览器不一致的两点，写明以免误用：
+	// 1. 同步模型下 `var id = setInterval(...)` 里的 id 在首次回调时还未
+	//    赋值，回调内用闭包变量清自己会失效。因此回调的第一个参数会收到
+	//    本次 interval 的 id（浏览器里该参数为 undefined）；回调不声明
+	//    参数时多余参数会被忽略，不受影响。setInterval(fn, ms, a, b) 的
+	//    额外参数仍按浏览器顺序先传给回调，id 追加在最后。
+	// 2. 回调之间没有其他代码在跑，轮询类脚本等不到外部条件变化，只能靠
+	//    回调自身的状态/时间判断；不清的 interval 靠下面的上限兜底停下。
+	_ = e.vm.Set("setInterval", func(call goja.FunctionCall) goja.Value {
+		fn, ok := goja.AssertFunction(call.Argument(0))
+		if !ok {
+			return e.vm.ToValue(0)
+		}
+		wait := time.Duration(call.Argument(1).ToInteger()) * time.Millisecond
+		if wait < 0 {
+			wait = 0
+		}
+		if wait > maxTimerDelay {
+			wait = maxTimerDelay
+		}
+		e.nextIntervalID++
+		id := e.nextIntervalID
+		if e.intervals == nil {
+			e.intervals = make(map[int]bool)
+		}
+		e.intervals[id] = true
+		defer delete(e.intervals, id)
+		// 额外参数（setInterval(fn, ms, a, b) 里的 a、b）按浏览器顺序先传，
+		// 本次 interval 的 id 追加在最后，供回调内 clearInterval 自我取消。
+		args := make([]goja.Value, 0, len(call.Arguments)-2+1)
+		for _, a := range call.Arguments[2:] {
+			args = append(args, a)
+		}
+		args = append(args, e.vm.ToValue(id))
+		start := time.Now()
+		for i := 0; i < maxIntervalCallbacks; i++ {
+			if !e.intervals[id] {
+				return e.vm.ToValue(id)
+			}
+			if time.Since(start) >= maxIntervalTotal {
+				log.Printf("[console.error] setInterval 回调达总耗时上限 %s，已停止（id=%d）", maxIntervalTotal, id)
+				return e.vm.ToValue(id)
+			}
+			if wait > 0 {
+				time.Sleep(wait)
+			}
+			if _, err := fn(goja.Undefined(), args...); err != nil {
+				log.Printf("[console.error] setInterval 回调执行失败: %v", err)
+			}
+		}
+		log.Printf("[console.error] setInterval 回调达次数上限 %d，已停止（id=%d）", maxIntervalCallbacks, id)
+		return e.vm.ToValue(id)
+	})
+	// clearInterval：从正在循环的集合里删掉 id，下一次循环开始前停下；
+	// 对不存在/已取消的 id 不报错。setInterval 返回后循环已结束，删掉
+	// 的也是已清理的条目，同样是 no-op。
+	_ = e.vm.Set("clearInterval", func(call goja.FunctionCall) goja.Value {
+		delete(e.intervals, int(call.Argument(0).ToInteger()))
 		return goja.Undefined()
 	})
 	installUAConstants(e)

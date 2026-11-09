@@ -44,6 +44,12 @@ type Engine struct {
 	// 裸读会让一次请求拿到别人那次调用的 ctx，被别人结束时的 cancel 殃及。
 	ctxMu sync.RWMutex
 	ctx   context.Context
+	// nextIntervalID / intervals 是 setInterval shim 的状态：自增 id 与
+	// 正在循环的 interval 集合，clearInterval 靠它取消本次循环。goja
+	// Runtime 非并发安全，JS 只在单 goroutine 内跑，与 cookies/headers
+	// 的访问方式一致，故不另加锁。
+	nextIntervalID int
+	intervals      map[int]bool
 }
 
 // SetContext 绑定本次调用的上下文（搜索/详情等）。JS 里的 req 请求会携带它，
