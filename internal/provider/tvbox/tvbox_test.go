@@ -107,6 +107,56 @@ func TestResolveUnknownEpisode(t *testing.T) {
 	}
 }
 
+// TestParseEpIDAllowsSlashInVodID 剧集 id 是 "<vodID>/<线路>/<集>"，vodID
+// 本身可以是带斜杠的路径或 URL（如 drpy 站的详情地址）；只按“正好 3 段”
+// 拆会把冷缓存反查直接判非法。应从右往左拆：最后两段是数字下标，
+// 其余全是 vodID。
+func TestParseEpIDAllowsSlashInVodID(t *testing.T) {
+	cases := []struct {
+		id    string
+		vodID string
+		si    int
+		ei    int
+	}{
+		{"1/0/1", "1", 0, 1},
+		{"/vod/123.html/0/1", "/vod/123.html", 0, 1},
+		{"https://example.com/vod/123/2/3", "https://example.com/vod/123", 2, 3},
+		{"show/1/2/3/4", "show/1/2", 3, 4},
+	}
+	for _, c := range cases {
+		vodID, si, ei, err := parseEpID(c.id)
+		if err != nil {
+			t.Errorf("parseEpID(%q) err = %v", c.id, err)
+			continue
+		}
+		if vodID != c.vodID || si != c.si || ei != c.ei {
+			t.Errorf("parseEpID(%q) = (%q,%d,%d), want (%q,%d,%d)", c.id, vodID, si, ei, c.vodID, c.si, c.ei)
+		}
+	}
+	for _, id := range []string{"1/0", "1/x/1", "1/0/x", "", "1/0/1/extra/x"} {
+		if _, _, _, err := parseEpID(id); err == nil {
+			t.Errorf("parseEpID(%q) 应报错", id)
+		}
+	}
+}
+
+// TestResolveColdCacheWithSlashVodID 冷缓存反查：剧集 id 的 vodID 部分
+// 带斜杠时，Resolve 应能拆出 vodID、重新拉详情并找到剧集，而不是报非法 id。
+func TestResolveColdCacheWithSlashVodID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"code":1,"list":[{"vod_id":"/vod/123.html","vod_name":"片名","vod_play_from":"线路1","vod_play_url":"第01集$https://cdn/x/1.m3u8"}]}`))
+	}))
+	defer srv.Close()
+	p := New(config.Site{Key: "test", Name: "测试站", Type: config.SiteTypeCMS, API: srv.URL})
+	st, err := p.Resolve(context.Background(), "/vod/123.html/0/0")
+	if err != nil {
+		t.Fatalf("Resolve 失败: %v", err)
+	}
+	if st.URL != "https://cdn/x/1.m3u8" {
+		t.Fatalf("Resolve URL = %q", st.URL)
+	}
+}
+
 func TestKindForURLClassifiesTransportStream(t *testing.T) {
 	if got := kindForURL("https://media.example/live.ts?token=1"); got != player.StreamTS {
 		t.Fatalf("kindForURL() = %v, want TS", got)

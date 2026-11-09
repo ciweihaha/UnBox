@@ -179,18 +179,19 @@ func toItems(videos []cmsVideo) []provider.Item {
 	return out
 }
 
-// parseEpID 拆 "<vodID>/<si>/<ei>"。
+// parseEpID 拆 "<vodID>/<si>/<ei>"。vodID 本身可含斜杠（drpy 站的详情
+// 地址就是路径或 URL），所以从右往左拆：最后两段是数字下标，其余全是 vodID。
 func parseEpID(id string) (vodID string, si, ei int, err error) {
 	parts := strings.Split(id, "/")
-	if len(parts) != 3 {
+	if len(parts) < 3 {
 		return "", 0, 0, fmt.Errorf("剧集 id 非法: %s", id)
 	}
-	si, err1 := strconv.Atoi(parts[1])
-	ei, err2 := strconv.Atoi(parts[2])
+	si, err1 := strconv.Atoi(parts[len(parts)-2])
+	ei, err2 := strconv.Atoi(parts[len(parts)-1])
 	if err1 != nil || err2 != nil {
 		return "", 0, 0, fmt.Errorf("剧集 id 非法: %s", id)
 	}
-	return parts[0], si, ei, nil
+	return strings.Join(parts[:len(parts)-2], "/"), si, ei, nil
 }
 
 // originOf 取站点 api 的 scheme://host 作 Referer（防盗链）。
