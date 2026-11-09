@@ -30,6 +30,7 @@ type Player struct {
 	candidates []string      // 当前会话候选（主源在前）
 	stream     player.Stream // 当前会话原始流（含 Headers/Kind）
 	index      int           // 当前已加载候选下标
+	gen        int64         // 会话代际：每次 Load 自增，切换只为创建它的那一代切源
 	closeOnce  sync.Once
 	closeErr   error
 }
@@ -65,7 +66,12 @@ func (p *Player) loop() {
 				return
 			}
 			if ev.Kind == player.EventEOF || ev.Kind == player.EventError {
-				p.switchToNext()
+				// 在事件到达时取代际：切换若在等锁期间被新会话取代，代际
+				// 已变，旧备份就不再加载。
+				p.mu.Lock()
+				gen := p.gen
+				p.mu.Unlock()
+				p.switchToNext(gen)
 			}
 			if !p.forward(ev) {
 				return
@@ -97,16 +103,21 @@ func (p *Player) forward(ev player.Event) bool {
 	}
 }
 
-func (p *Player) switchToNext() {
+func (p *Player) switchToNext(gen int64) {
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	if gen != p.gen {
+		return // 等锁期间已有新会话，旧切换作废
+	}
 	if p.index+1 >= len(p.candidates) {
-		p.mu.Unlock()
 		return
 	}
 	p.index++
 	next := p.candidates[p.index]
 	s := p.stream
-	p.mu.Unlock()
+	// Load 在锁内同步执行，与新会话的 Load 互斥：切换要么先完成（新 Load
+	// 随后覆盖，最终仍是新会话），要么排队等新 Load 完成并因代际已变而
+	// 跳过；新会话永远最后生效，旧备份绝不会盖掉用户新选的流。
 	// switchToNext 由后台事件循环调用，Load 失败无法回传给任何调用方；
 	// 仅记日志，仍不改行为（下一次终端事件会再尝试切到下一条）。
 	if err := p.inner.Load(context.Background(), streamWith(s, next)); err != nil {
@@ -120,10 +131,12 @@ func (p *Player) Load(ctx context.Context, s player.Stream) error {
 		candidates = p.prober.Rank(ctx, candidates, s.Headers)
 	}
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.gen++
 	p.candidates = candidates
 	p.stream = s
 	p.index = 0
-	p.mu.Unlock()
+	// Load 在锁内执行，与后台切换互斥（见 switchToNext），新会话永远最后生效。
 	return p.inner.Load(ctx, streamWith(s, candidates[0]))
 }
 

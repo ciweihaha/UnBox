@@ -197,6 +197,86 @@ func TestFailoverNewLoadResetsSession(t *testing.T) {
 	}
 }
 
+// blockingFakePlayer 在 blockNext 置位时让下一次 Load 挂起，直到放行；
+// 每次 Load 开始都向 started 发送 URL，供测试确认切换已进入 Load。
+type blockingFakePlayer struct {
+	*fakePlayer
+	started chan string
+	release chan struct{}
+	mu      sync.Mutex
+	block   bool
+}
+
+func (b *blockingFakePlayer) Load(ctx context.Context, s player.Stream) error {
+	b.started <- s.URL
+	b.mu.Lock()
+	block := b.block
+	b.block = false // 只拦一次
+	b.mu.Unlock()
+	if block {
+		<-b.release
+	}
+	return b.fakePlayer.Load(ctx, s)
+}
+
+func (b *blockingFakePlayer) setBlock() {
+	b.mu.Lock()
+	b.block = true
+	b.mu.Unlock()
+}
+
+// TestFailoverStaleSwitchDoesNotClobberNewLoad 旧会话的终端事件触发切换时，
+// 若用户已开始新会话，切换不得盖掉新会话的流：切换 Load 与新 Load 交错时，
+// 最终留在内层的必须是新会话的地址。
+func TestFailoverStaleSwitchDoesNotClobberNewLoad(t *testing.T) {
+	inner := &blockingFakePlayer{
+		fakePlayer: newFakePlayer(),
+		started:    make(chan string, 16),
+		release:    make(chan struct{}),
+	}
+	fp := New(inner, nil)
+	defer fp.Close()
+
+	if err := fp.Load(context.Background(), player.Stream{URL: "http://a", Backups: []string{"http://a2"}}); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	<-inner.started // 排掉初次 Load 的信号
+	// 拦住切换的 Load，确认它已进入后再发新会话。
+	inner.setBlock()
+	inner.emit(player.EventError)
+	select {
+	case url := <-inner.started:
+		if url != "http://a2" {
+			t.Fatalf("切换应先加载 a2，got %q", url)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("切换未进入 Load")
+	}
+	time.Sleep(50 * time.Millisecond) // 让切换的 Load 走到挂起点
+	// 用户此时选了新片：新 Load 应排队等切换完成，且最终生效。
+	loadDone := make(chan error, 1)
+	go func() {
+		loadDone <- fp.Load(context.Background(), player.Stream{URL: "http://b"})
+	}()
+	time.Sleep(50 * time.Millisecond) // 给新 Load 走到互斥/门上的时间
+	close(inner.release)              // 放行切换的 Load
+	// 等两路 Load 都落盘再断言：修前新 Load 会先于被拦住的切换完成，
+	// 若不断言前不等齐，读到的可能是切换尚未追加的中间态。
+	waitFor(t, func() bool { return len(inner.loadedURLs()) == 3 })
+	select {
+	case err := <-loadDone:
+		if err != nil {
+			t.Fatalf("新 Load: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("新 Load 未在超时前完成")
+	}
+	got := inner.loadedURLs()
+	if len(got) == 0 || got[len(got)-1] != "http://b" {
+		t.Fatalf("loaded = %v，最终生效的应是新会话 b", got)
+	}
+}
+
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
 	for i := 0; i < 100; i++ {
