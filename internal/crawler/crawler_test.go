@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNew(t *testing.T) {
@@ -258,6 +259,55 @@ func TestSetTimeoutShim(t *testing.T) {
 	v, err = e.Call("probe2")
 	if err != nil || v.String() != "ok" {
 		t.Fatalf("clearTimeout = %v, %v", v, err)
+	}
+}
+
+// TestSetIntervalSingleArgDoesNotPanic setInterval(fn) 只传一个参数时
+// （浏览器里合法，delay 默认为 0），不应因参数切片越界 panic。
+func TestSetIntervalSingleArgDoesNotPanic(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("setInterval(fn) 不应 panic: %v", r)
+		}
+	}()
+	e := New()
+	src := `function probe(){
+  var x = 0;
+  setInterval(function(timerId){ x++; if (x >= 2) { clearInterval(timerId); } });
+  return x;
+}`
+	if err := e.Load(src); err != nil {
+		t.Fatal(err)
+	}
+	v, err := e.Call("probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.String() != "2" {
+		t.Fatalf("setInterval(fn) 应执行 2 次后被取消，实际: %q", v.String())
+	}
+}
+
+// TestSleepIsCapped sleep(ms) 不应让超大值卡死引擎：与 setTimeout/setInterval
+// 的单次等待上限一致，超过上限按上限执行。
+func TestSleepIsCapped(t *testing.T) {
+	e := New()
+	src := `function probe(){ sleep(3000); return "ok"; }`
+	if err := e.Load(src); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	v, err := e.Call("probe")
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.String() != "ok" {
+		t.Fatalf("probe = %q", v.String())
+	}
+	// 未封顶时 sleep(3000) 要 3 秒；封顶 1000ms 后应远小于 2.5 秒。
+	if elapsed >= 2500*time.Millisecond {
+		t.Fatalf("sleep 超大值未被封顶，耗时 %v", elapsed)
 	}
 }
 

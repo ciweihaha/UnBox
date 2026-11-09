@@ -15,7 +15,7 @@ import (
 
 const (
 	// maxTimerDelay 是单次定时等待的上限（setTimeout 的既有上限，
-	// setInterval 的每轮等待同样遵守），避免脚本用超大间隔卡死引擎。
+	// setInterval 的每轮等待与 sleep 同样遵守），避免脚本用超大间隔卡死引擎。
 	maxTimerDelay = 1000 * time.Millisecond
 	// maxIntervalCallbacks 是单次 setInterval 调用内回调的最多执行次数。
 	// 同步 shim 下不清的 interval 会无限循环，100 次足够覆盖真实轮询
@@ -111,7 +111,14 @@ func (e *Engine) installHelpers() {
 		return e.vm.ToValue(hex.EncodeToString(h[:]))
 	})
 	_ = e.vm.Set("sleep", func(call goja.FunctionCall) goja.Value {
-		time.Sleep(time.Duration(call.Argument(0).ToInteger()) * time.Millisecond)
+		ms := call.Argument(0).ToInteger()
+		if ms < 0 {
+			ms = 0
+		}
+		if ms > maxTimerDelay.Milliseconds() {
+			ms = maxTimerDelay.Milliseconds()
+		}
+		time.Sleep(time.Duration(ms) * time.Millisecond)
 		return goja.Undefined()
 	})
 	_ = e.vm.Set("cookie", func(call goja.FunctionCall) goja.Value {
@@ -230,8 +237,13 @@ func (e *Engine) installHelpers() {
 		defer delete(e.intervals, id)
 		// 额外参数（setInterval(fn, ms, a, b) 里的 a、b）按浏览器顺序先传，
 		// 本次 interval 的 id 追加在最后，供回调内 clearInterval 自我取消。
-		args := make([]goja.Value, 0, len(call.Arguments)-2+1)
-		args = append(args, call.Arguments[2:]...)
+		// 只传 fn 时（浏览器里合法，delay 默认为 0）没有额外参数，直接传 id。
+		var extra []goja.Value
+		if len(call.Arguments) > 2 {
+			extra = call.Arguments[2:]
+		}
+		args := make([]goja.Value, 0, len(extra)+1)
+		args = append(args, extra...)
 		args = append(args, e.vm.ToValue(id))
 		start := time.Now()
 		for i := 0; i < maxIntervalCallbacks; i++ {
