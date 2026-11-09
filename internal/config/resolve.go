@@ -38,24 +38,27 @@ const resolveWorkerLimit = 8
 // 深度预算内有更大空间）；以相同或更深深度重复到达则跳过。claim 方法在
 // 互斥锁内原子地完成"检查 + 写入"，保证并发下每个 ref 的最终 seen 值
 // 仍是可达的最小深度。
+//
+// collectedDepth 记录每个已收集终端配置的到达深度：同一 ref 经多路径可达
+// 时来源名（前端显示的线路名）取最浅路径的那一个，与并发时序无关。
 type resolveState struct {
-	mu            sync.Mutex
-	seen          map[string]int
-	cache         map[string]*fetchResult
-	inflight      map[string]chan struct{}
-	collected     map[string]bool
-	depthRejected map[string]bool
-	out           []*Config
-	errs          []error
+	mu             sync.Mutex
+	seen           map[string]int
+	cache          map[string]*fetchResult
+	inflight       map[string]chan struct{}
+	collectedDepth map[string]int
+	depthRejected  map[string]bool
+	out            []*Config
+	errs           []error
 }
 
 func newResolveState() *resolveState {
 	return &resolveState{
-		seen:          make(map[string]int),
-		cache:         make(map[string]*fetchResult),
-		inflight:      make(map[string]chan struct{}),
-		collected:     make(map[string]bool),
-		depthRejected: make(map[string]bool),
+		seen:           make(map[string]int),
+		cache:          make(map[string]*fetchResult),
+		inflight:       make(map[string]chan struct{}),
+		collectedDepth: make(map[string]int),
+		depthRejected:  make(map[string]bool),
 	}
 }
 
@@ -85,14 +88,25 @@ func (st *resolveState) recordErr(err error) {
 	st.mu.Unlock()
 }
 
-// collect 把一个终端配置收集进 out，同一 ref 只收集一次。
-func (st *resolveState) collect(ref string, cfg *Config) {
+// collect 把一个终端配置收集进 out，同一 ref 只收集一次；来源名取到达深度
+// 最浅的那条路径（菱形结构下多条路径可能带不同线路名，最浅者确定，与并发
+// 时序无关）。SourceName/SourceURL 在锁内赋值：此前 walk 在锁外直接写共享
+// 的缓存 Config，多 walk 并发写同一字段是 data race；三条以上路径时最终值
+// 还取决于谁后写完。记下来源地址，供站点里的相对路径解析（见 ResolveRelativeURLs）。
+func (st *resolveState) collect(ref string, cfg *Config, sourceName string, depth int) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if st.collected[ref] {
+	if prev, ok := st.collectedDepth[ref]; ok {
+		if depth < prev {
+			// 更浅的路径后来居上：只改来源名，out 里仍是同一份配置。
+			st.collectedDepth[ref] = depth
+			cfg.SourceName = sourceName
+		}
 		return
 	}
-	st.collected[ref] = true
+	st.collectedDepth[ref] = depth
+	cfg.SourceName = sourceName
+	cfg.SourceURL = ref
 	st.out = append(st.out, cfg)
 }
 
@@ -234,10 +248,7 @@ func (r *Resolver) walk(ctx context.Context, ref string, depth int, sourceName s
 	}
 
 	if isTerminal {
-		cfg.SourceName = sourceName
-		// 记下来源地址，供站点里的相对路径解析（见 ResolveRelativeURLs）。
-		cfg.SourceURL = ref
-		st.collect(ref, cfg)
+		st.collect(ref, cfg, sourceName, depth)
 	}
 
 	for _, h := range cfg.StoreHouse {

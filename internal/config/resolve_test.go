@@ -567,6 +567,56 @@ func TestResolveDiamondTerminalCollectedOnce(t *testing.T) {
 	}
 }
 
+// TestResolveDiamondSourceNameIsShallowest 验证菱形结构中同一终端配置经深、
+// 浅两条路径可达时，来源名（前端显示的线路名）取最浅路径的那一个，且与并
+// 发时序无关。
+//
+// 结构：
+//
+//	root --urls--> d1 --> d2 --> x（depth3，先到达，来源名“深线路”）
+//	root --urls--> s1 ----------> x（depth2，更浅，来源名“浅线路”）
+//
+// s1 的拉取只放慢 50ms：保证深路径先认领 x（3 跳快取约 3ms），而浅路径
+// 随后到达时深路径对 x 的拉取仍在进行中（/x 慢 200ms）——浅路径在
+// single-flight 通道上等待，两路 walk 在通道关闭后几乎同时写来源名，
+// 形成真正的 data race（-race 下失败）。若浅路径晚到 200ms，深路径的
+// collect 锁会把两次写串行化，race 反而测不出来。
+func TestResolveDiamondSourceNameIsShallowest(t *testing.T) {
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	mux.HandleFunc("/root", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"urls":[{"url":"%s/d1","name":"深"},{"url":"%s/s1","name":"浅"}]}`, srv.URL, srv.URL)
+	})
+	mux.HandleFunc("/d1", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"urls":[{"url":"%s/d2","name":"d2"}]}`, srv.URL)
+	})
+	mux.HandleFunc("/d2", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"urls":[{"url":"%s/x","name":"深线路"}]}`, srv.URL)
+	})
+	mux.HandleFunc("/s1", func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(50 * time.Millisecond) // 浅路径稍慢，保证深路径先认领 x
+		fmt.Fprintf(w, `{"urls":[{"url":"%s/x","name":"浅线路"}]}`, srv.URL)
+	})
+	mux.HandleFunc("/x", func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond) // 拉取 x 本身慢，让浅路径赶上等待
+		fmt.Fprint(w, `{"sites":[{"key":"X","name":"站点X","type":1,"api":"http://x/api"}]}`)
+	})
+
+	r := NewResolver()
+	cfgs, err := r.Resolve(context.Background(), srv.URL+"/root")
+	if err != nil {
+		t.Fatalf("展开不应报错: %v", err)
+	}
+	if len(cfgs) != 1 {
+		t.Fatalf("终端配置只应收集一次，实际 %d 个", len(cfgs))
+	}
+	if cfgs[0].SourceName != "浅线路" {
+		t.Fatalf("来源名应取最浅路径的“浅线路”，实际 %q", cfgs[0].SourceName)
+	}
+}
+
 func timeAfter() <-chan time.Time {
 	return time.After(10 * time.Second)
 }
