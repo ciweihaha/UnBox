@@ -146,6 +146,8 @@ func (s *Store) migrate() error {
 
 // migrateSourcesSchema 把早期 sources 表的 ref 单主键迁移为 (ref, kind) 复合主键。
 // 旧表上 ON CONFLICT(ref, kind) 会因缺少约束而报错，导致源无法登记（回显失败）。
+// 迁移必须保留数据：建新表、搬数据、删旧表、改名；直接 DROP 会清空用户的全部
+// 导入源历史（fe039af 的做法，升级即丢数据）。
 func (s *Store) migrateSourcesSchema() error {
 	var pkCols int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('sources') WHERE pk > 0`).Scan(&pkCols); err != nil {
@@ -154,11 +156,25 @@ func (s *Store) migrateSourcesSchema() error {
 	if pkCols >= 2 {
 		return nil // 已是复合主键
 	}
-	if _, err := s.db.Exec(`DROP TABLE IF EXISTS sources`); err != nil {
+	tx, err := s.db.Begin()
+	if err != nil {
 		return err
 	}
-	_, err := s.db.Exec(`CREATE TABLE sources (ref TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (ref, kind))`)
-	return err
+	defer tx.Rollback()
+	if _, err := tx.Exec(`CREATE TABLE sources_new (ref TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (ref, kind))`); err != nil {
+		return err
+	}
+	// 旧表主键是 ref 单列，(ref, kind) 不可能重复；OR IGNORE 只是防万一。
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO sources_new(ref, kind, at) SELECT ref, kind, at FROM sources`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE sources`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`ALTER TABLE sources_new RENAME TO sources`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) AddFavorite(id, name, group, url string) error {
@@ -420,11 +436,19 @@ func (s *Store) AddLibraryDir(path string) error {
 }
 
 func (s *Store) RemoveLibraryDir(path string) error {
-	_, err := s.db.Exec(`DELETE FROM library_dirs WHERE path=?`, path)
-	if err == nil {
-		_, err = s.db.Exec(`DELETE FROM library_items WHERE dir=?`, path)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
 	}
-	return err
+	defer tx.Rollback()
+	// 目录与条目同属一个事务：第二步失败时目录也不删，不留孤儿条目。
+	if _, err := tx.Exec(`DELETE FROM library_dirs WHERE path=?`, path); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM library_items WHERE dir=?`, path); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ListLibraryDirs() ([]LibraryDir, error) {

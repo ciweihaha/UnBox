@@ -1,8 +1,11 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestVodSearchHistoryCRUD(t *testing.T) {
@@ -161,6 +164,70 @@ func TestLibraryItemsReplacePerDir(t *testing.T) {
 		if it.Path == "/a/1.mp4" {
 			t.Fatalf("已删文件仍在: %+v", items)
 		}
+	}
+}
+
+// TestMigrateSourcesSchemaPreservesHistory 旧 ref 单主键的 sources 表升级为
+// (ref, kind) 复合主键时，历史记录必须保留；直接 DROP 重建会清空用户的导入源历史。
+func TestMigrateSourcesSchemaPreservesHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 建旧表（ref 单主键）并写入两条历史。
+	if _, err := db.Exec(`CREATE TABLE sources (ref TEXT PRIMARY KEY, kind TEXT NOT NULL, at INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO sources(ref, kind, at) VALUES('http://x/vod.json','vod',111),('http://x/live.m3u','live',222)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	got, err := s.ListSources()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("迁移后 sources = %+v，期望保留 2 条历史", got)
+	}
+	// 迁移后复合主键生效：同 ref 不同 kind 可共存。
+	if err := s.AddSource("live", "http://x/vod.json"); err != nil {
+		t.Fatalf("AddSource 同 ref 不同 kind 应成功: %v", err)
+	}
+}
+
+// TestRemoveLibraryDirRemovesItems 删媒体库目录时，其下扫描条目应一并清除，
+// 不留孤儿条目。
+func TestRemoveLibraryDirRemovesItems(t *testing.T) {
+	s := openTemp(t)
+	defer s.Close()
+
+	if err := s.AddLibraryDir("/mnt/movies"); err != nil {
+		t.Fatal(err)
+	}
+	items := []LibraryItem{{Path: "/mnt/movies/1.mp4", Name: "1", Dir: "/mnt/movies", Ext: "mp4", Size: 10}}
+	if err := s.ReplaceLibraryItems("/mnt/movies", items); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveLibraryDir("/mnt/movies"); err != nil {
+		t.Fatal(err)
+	}
+	dirs, err := s.ListLibraryDirs()
+	if err != nil || len(dirs) != 0 {
+		t.Fatalf("dirs = %+v, %v", dirs, err)
+	}
+	left, err := s.ListLibraryItems()
+	if err != nil || len(left) != 0 {
+		t.Fatalf("删目录后仍有 %d 条孤儿条目: %+v", len(left), left)
 	}
 }
 
