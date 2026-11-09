@@ -48,15 +48,15 @@ UnBox 支持两类点播源，导入方式一致（设置页粘贴地址即可�
 
 | 类型                | 结构                                | 支持的站点                                                          |
 |---------------------|-------------------------------------|---------------------------------------------------------------------|
-| **TVBox 单线路源**  | 顶层直接含 `sites` 数组             | type=1 CMS JSON、type=3 爬虫（`http` drpy 服务 / `.js` FongMi js0 / drpy2 / ESM）、`csp_AList` / `csp_WebDAV`、`csp_XBPQ`（规则型 JAR） |
+| **TVBox 单线路源**  | 顶层直接含 `sites` 数组             | type=1 CMS JSON、type=3 爬虫（`http` drpy 服务 / `.js` FongMi js0 / drpy2 / ESM）、`csp_XBPQ` / `csp_XYQHiker`（规则型 JAR） |
 | **FongMi 多线路源** | `storeHouse` → `urls[]` → 配置 三层 | 点播页可切换线路；每条线路内部与单线路源同构                        |
 
-> `csp_` JAR 站点按「Go 规则引擎」路线接入：`csp_XBPQ` 已支持（M6.1），
-> `csp_XYQHiker` 纳入 M6.2 计划；其余 `csp_` 长尾与 xpath（type=0）暂不支持。
+> `csp_` JAR 站点按「Go 规则引擎」路线接入：`csp_XBPQ` / `csp_XYQHiker` 已支持
+> （M6.1/M6.2）；其余 `csp_` 长尾与 xpath（type=0）暂不支持。
 > `.js` 爬虫已支持 FongMi js0、drpy2（加载 `ext` 站点规则）与 ES Module
 > （import/export、`assets://`、`__jsEvalReturn`）；drpy2 的 `fyfilter`/筛选与
-> `cat.js` 依赖脚本仍有缺口，见「已知限制」。网盘源先支持 AList/WebDAV
-> （M8.1/M8.2），云盘分享解析与 Wogg/Wobg 暂不支持。详见「已知限制」。
+> `cat.js` 依赖脚本仍有缺口，见「已知限制」。网盘源计划支持 AList/WebDAV
+> （M8.1/M8.2，尚未实现），云盘分享解析与 Wogg/Wobg 暂不支持。详见「已知限制」。
 
 ## 🖥️ 安装
 
@@ -148,14 +148,14 @@ Release 挂载产物。
 
 - [ ] Windows / macOS 完整实测与收尾
 - [x] M6.1 `csp_XBPQ` 规则引擎（分类/列表/详情/搜索/播放）
-- [ ] M6.2 `csp_XYQHiker` 规则引擎
+- [x] M6.2 `csp_XYQHiker` 规则引擎
 - [ ] M6.3 `csp_` 长尾按收益逐类扩展
 - [ ] M6.4 可选远程 spider 桥（有明确需求再做）
 - [x] M7.1 修复 drpy2 站点选源（加载 `ext` 规则脚本）
 - [x] M7.2 ES Module 加载器（import/export、assets://、`__jsEvalReturn`）
 - [x] M7.3 `cat.js` 自有 shim（不内置 GPL 资源）+ `gbk.js` shim + `fyfilter` 展开
 - [ ] M7.4 drpy2 / ESM 真实站点验收（首轮报告的 `fyfilter`、`console`、掩码、
-  `360影视` 详情与播放链路均已修复；仍缺 `setInterval` shim 与上游未声明许可证的
+  `360影视` 详情与播放链路及 `setInterval` shim 均已修复；仍缺上游未声明许可证的
   `模板.js`，见 `docs/2026-10-17-m7-acceptance.md` 与 HANDOFF「近期更新」）
 - [ ] M8.1 AList 原生 Provider（多盘、公开/私有、搜索）
 - [ ] M8.2 WebDAV 原生 Provider（PROPFIND + Basic Auth）
@@ -166,7 +166,7 @@ Release 挂载产物。
 
 - FongMi多线路源中基于 `csp_` JAR 的站点：JAR 本身是 Android DEX，不能直接用 Go
   执行；但 `csp_XBPQ` 的 `ext` 是明文规则 JSON，已按 Go 规则引擎接入（M6.1）。
-  其余 `csp_` 长尾（含 `csp_XYQHiker`，计划 M6.2）与 xpath（type=0）暂不支持。
+  其余 `csp_` 长尾与 xpath（type=0）暂不支持。
   不使用内嵌 JVM/ART，也不执行下载的 JAR。
 - `.js` 爬虫：FongMi js0、drpy2（`var rule`，Provider 加载 `ext`）与 ES Module
   已支持，`cat.js` / `gbk.js` 走自有 shim（不内置 GPL 资源），drpy2 的
@@ -177,7 +177,7 @@ Release 挂载产物。
 - 规则站给出的线路若指向平台播放页（B站 / 腾讯视频 / 爱奇艺 / 优酷 / 芒果 / 搜狐 /
   乐视），这些页面需要平台会员或解析服务，应用会直接说明原因并自动尝试下一条线路，
   不会静默失败。
-- 网盘源：先支持 `csp_AList` / `csp_WebDAV`（M8.1/M8.2）。`QuarkShare` /
+- 网盘源：计划支持 `csp_AList` / `csp_WebDAV`（M8.1/M8.2），尚未实现。`QuarkShare` /
   `UCShare` / `AliShare` / `P115Share` / `PikPakShare` / `ThunderShare` 依赖
   用户自己的网盘 token 和云盘 API，暂不支持；`Wogg`/`Wobg` 依赖 WebView/反爬，
   不建议在桌面端实现。可以先用 AList 挂载这些网盘作为替代。
