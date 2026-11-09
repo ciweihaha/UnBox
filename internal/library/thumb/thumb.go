@@ -40,10 +40,15 @@ func (g *MpvGenerator) Generate(videoPath, cachePath string) error {
 	if g == nil || g.mpvPath == "" {
 		return ErrNoMpv
 	}
+	// 视频路径转绝对路径：相对路径会被 mpv 按当前工作目录解析，横杠开头
+	// 的文件名还会被当成选项；库内其它方法都先 Abs，这里保持一致。
+	absVideo, err := filepath.Abs(videoPath)
+	if err != nil {
+		return fmt.Errorf("视频路径无效: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
 		return fmt.Errorf("创建缩略图目录失败: %w", err)
 	}
-	_ = os.Remove(cachePath)
 	outDir, err := os.MkdirTemp(filepath.Dir(cachePath), ".unbox-thumb-*")
 	if err != nil {
 		return fmt.Errorf("创建 mpv 输出目录失败: %w", err)
@@ -53,7 +58,7 @@ func (g *MpvGenerator) Generate(videoPath, cachePath string) error {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, g.mpvPath,
 		"--no-config", "--vo=image", "--vo-image-format=jpg",
-		"--frames=1", "--start=10%", "--vo-image-outdir="+outDir, videoPath)
+		"--frames=1", "--start=10%", "--vo-image-outdir="+outDir, absVideo)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
@@ -78,6 +83,8 @@ func (g *MpvGenerator) Generate(videoPath, cachePath string) error {
 		if statErr != nil || info.Size() == 0 {
 			continue
 		}
+		// Rename 原子覆盖目标（Windows 下 Go 用 MOVEFILE_REPLACE_EXISTING），
+		// 无需先删 cachePath；抓帧失败时旧海报得以保留。
 		if err := os.Rename(generated, cachePath); err != nil {
 			return fmt.Errorf("保存 mpv 缩略图失败: %w", err)
 		}
