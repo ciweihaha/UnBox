@@ -1,3 +1,6 @@
+// Package rule 实现 TVBox jar（csp_XBPQ / csp_XYQHiker）规则的纯 Go 引擎：
+// JSoup 链式选择器子集、XPath 子集、JSON 截取与模板规则解析，供
+// internal/provider/tvbox 的 JarProvider 调用。
 package rule
 
 import (

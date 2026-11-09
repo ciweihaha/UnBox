@@ -452,7 +452,8 @@ func (e *XYQHikerEngine) parseHTMLItems(doc *goquery.Document, kind, array, titl
 		name := e.extractOn(node, title)
 		href := e.extractOn(node, link)
 		if name == "" && kind == "搜索" {
-			// 搜索规则可能只有标题没有链接（无详情页）；跳过
+			// 搜索规则可能只有标题没有链接（无详情页）；标题为空的项无展示价值，跳过
+			continue
 		}
 		if href == "" {
 			if kind == "分类" {

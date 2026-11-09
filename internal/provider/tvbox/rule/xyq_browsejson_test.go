@@ -38,7 +38,8 @@ func TestXYQBrowseJSONMode(t *testing.T) {
 	if first.Title != "京剧样板戏" || first.ID != "https://cdn.example.com/x/1.mp4" {
 		t.Fatalf("首项 = %#v，期望 JSON 键提取 + 前缀补全", first)
 	}
-	if first.Logo != "https://cdn.example.com/https://cdn.example.com/1.jpg" && first.Logo != "https://cdn.example.com/1.jpg" {
-		// withPrefixSuffix 对绝对 URL 不拼前缀
+	// 绝对 URL 不拼前缀：withPrefixSuffix 与 absURL 均对 http(s) 开头原样返回。
+	if first.Logo != "https://cdn.example.com/1.jpg" {
+		t.Fatalf("首项 Logo = %q，期望 https://cdn.example.com/1.jpg（绝对 URL 不拼前缀）", first.Logo)
 	}
 }
