@@ -67,6 +67,23 @@ func TestXPathIDShortcut(t *testing.T) {
 	}
 }
 
+// 属性值里的斜杠不能拆步：//a[@href='/v1'] 里的 /v1 是谓词值的一部分，
+// 不是路径分隔。修前 xpathSplitSteps 会把它拆成 a[@href=' / v / 1'] 三段，
+// 拼出的非法选择器让 goquery 抛错（或直接 panic）。
+func TestXPathSlashInsideQuotedPredicate(t *testing.T) {
+	doc := jsoupDoc(t, xpathFixtureHTML)
+	got := xpathExtractFirst(doc, "//a[@href='/v1']/@href")
+	want := []string{"/v1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("@href = %v，期望 %v", got, want)
+	}
+	got = xpathExtractFirst(doc, `//a[@href="/v2"]/@href`)
+	want = []string{"/v2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("@href = %v，期望 %v", got, want)
+	}
+}
+
 // 空规则返回空。
 func TestXPathEmptyRule(t *testing.T) {
 	doc := jsoupDoc(t, xpathFixtureHTML)

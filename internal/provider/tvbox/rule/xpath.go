@@ -70,6 +70,8 @@ func xpathApplyStep(base *goquery.Selection, step string) *goquery.Selection {
 
 // xpathSplitSteps 把 xpath 按 / 拆成步；返回步列表与末尾取值步
 // （text()/@attr 形态，无则空串）。
+// 斜杠可能出现在引号里的谓词值中（如 //a[@href='/v1']），必须按引号
+// 状态拆步，否则谓词会被拆散、拼出非法选择器。
 func xpathSplitSteps(xpath string) ([]string, string) {
 	var steps []string
 	var cur strings.Builder
@@ -87,16 +89,28 @@ func xpathSplitSteps(xpath string) ([]string, string) {
 		}
 		cur.Reset()
 	}
+	quote := byte(0)
 	for ; i < len(s); i++ {
 		c := s[i]
-		if c == '/' {
+		if quote != 0 {
+			cur.WriteByte(c)
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			quote = c
+			cur.WriteByte(c)
+		case '/':
 			if cur.Len() == 0 {
 				continue // 前导 / 或 //：跳过
 			}
 			flush()
-			continue
+		default:
+			cur.WriteByte(c)
 		}
-		cur.WriteByte(c)
 	}
 	flush()
 	return steps, lastTake
