@@ -28,9 +28,12 @@ const (
 // 形如 "117461315749788+42845144529+32:16+5riF…=:5rWB…="。
 // bili_open 等脚本的 playerContent 直接吐这种串，客户端要拿 aid/cid 换真实流。
 // 不是这种形态（aid/cid 非纯数字、画质列表为空）返回 ok=false。
+// 注意：描述段是中文描述的 base64（如“杜比音效”→5p2c5q+U6Z+z5pWI），标准
+// base64 字母表含 +，按 + 分割可能多于 4 段；描述本身解析时直接丢弃，
+// 所以只要求至少 4 段、前三段合法，不卡死在正好 4 段。
 func parseBiliComposite(raw string) (aid, cid string, qualities []string, ok bool) {
 	parts := strings.Split(strings.TrimSpace(raw), "+")
-	if len(parts) != 4 {
+	if len(parts) < 4 {
 		return "", "", nil, false
 	}
 	aid, cid = parts[0], parts[1]

@@ -23,6 +23,23 @@ func TestParseBiliComposite(t *testing.T) {
 	}
 }
 
+// 描述段是中文描述的 base64（如“杜比音效”→5p2c5q+U6Z+z5pWI），标准
+// base64 字母表含 +，按 + 分割会多出一段；描述本身解析时直接丢弃，
+// 只要前三段（aid/cid/画质）合法就应识别，不能因描述含 + 就拒识。
+func TestParseBiliCompositeAcceptsPlusInDescription(t *testing.T) {
+	raw := "117461315749788+42845144529+32:16+5p2c5q+U6Z+z5pWI:5rWB55WFIDM2MFA="
+	aid, cid, qs, ok := parseBiliComposite(raw)
+	if !ok {
+		t.Fatal("描述含 + 的复合地址应被识别为 bilibili 格式")
+	}
+	if aid != "117461315749788" || cid != "42845144529" {
+		t.Fatalf("aid/cid 解析错误: %q %q", aid, cid)
+	}
+	if len(qs) != 2 || qs[0] != "32" || qs[1] != "16" {
+		t.Fatalf("画质列表解析错误: %+v", qs)
+	}
+}
+
 func TestParseBiliCompositeRejectsNonBili(t *testing.T) {
 	for _, raw := range []string{
 		"https://example.com/v.mp4",
