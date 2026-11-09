@@ -2,11 +2,14 @@ package tvbox
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/unbox/unbox/internal/httpx"
 )
 
 func TestClientVideolist(t *testing.T) {
@@ -87,6 +90,27 @@ func TestClientVideolistHTMLResponse(t *testing.T) {
 	}
 	if strings.Contains(msg, "invalid character") {
 		t.Fatalf("不应再暴露 json 包的原始报错，实际: %v", err)
+	}
+}
+
+// TestClientRejectsOversizedBody 源站返回超大体时应直接拒绝，而不是
+// 全读进内存再解析（CMS 接口都是单页 JSON，16MB 已远超合理值）。
+func TestClientRejectsOversizedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		chunk := make([]byte, 1<<20)
+		for i := 0; i < maxAPIResponseBytes/(1<<20)+1; i++ {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	c := newClient(srv.URL)
+	if _, err := c.videolist(context.Background(), "16", "", 0); !errors.Is(err, httpx.ErrBodyTooLarge) {
+		t.Fatalf("超大响应应被拒绝，got err=%v", err)
 	}
 }
 

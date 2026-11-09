@@ -110,7 +110,7 @@ func (c *drpyClient) get(ctx context.Context, path string, q url.Values) ([]byte
 		return nil, err
 	}
 	req.Header.Set("User-Agent", tvboxUA)
-	resp, body, err := httpx.DoReadAll(c.hc, req, 0)
+	resp, body, err := httpx.DoReadAll(c.hc, req, maxAPIResponseBytes)
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %w", err)
 	}

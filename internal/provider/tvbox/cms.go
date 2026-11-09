@@ -135,6 +135,11 @@ func headSnippet(b []byte) string {
 	return strings.TrimSpace(string(b))
 }
 
+// maxAPIResponseBytes 是 CMS/drpy 单次接口响应的上限：接口都是单页 JSON
+// （列表/详情/搜索/首页），正常只有几十 KB；不限流时源站返回超大体
+// 会被全读进内存再解析，有 OOM 风险。16MB 与 crawler req() 的上限一致。
+const maxAPIResponseBytes = 16 << 20
+
 // client 是单个 CMS 站点的 JSON API 客户端。
 type client struct {
 	base string
@@ -236,7 +241,7 @@ func (c *client) get(ctx context.Context, q url.Values) ([]byte, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", tvboxUA)
-	resp, body, err := httpx.DoReadAll(c.hc, req, 0)
+	resp, body, err := httpx.DoReadAll(c.hc, req, maxAPIResponseBytes)
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %w", err)
 	}

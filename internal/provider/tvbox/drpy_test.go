@@ -2,11 +2,13 @@ package tvbox
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/unbox/unbox/internal/config"
+	"github.com/unbox/unbox/internal/httpx"
 )
 
 // newDrpyTestServer 起一个按路径返回固定 JSON 的 drpy 服务，并记录命中请求。
@@ -39,6 +41,27 @@ func TestDrpyHome(t *testing.T) {
 	}
 	if got := hits(); len(got) != 1 || got[0] != "/api/homeVod?" {
 		t.Fatalf("Home 请求 = %v", got)
+	}
+}
+
+// TestDrpyClientRejectsOversizedBody 同 CMS：超大响应应直接拒绝，
+// 而不是全读进内存再解析。
+func TestDrpyClientRejectsOversizedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		chunk := make([]byte, 1<<20)
+		for i := 0; i < maxAPIResponseBytes/(1<<20)+1; i++ {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	c := newDrpyClient(srv.URL)
+	if _, err := c.homeVod(context.Background()); !errors.Is(err, httpx.ErrBodyTooLarge) {
+		t.Fatalf("超大响应应被拒绝，got err=%v", err)
 	}
 }
 
