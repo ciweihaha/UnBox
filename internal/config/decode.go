@@ -75,7 +75,9 @@ func decode(raw []byte, depth int) ([]byte, error) {
 }
 
 func tryBase64(b []byte) ([]byte, bool) {
-	s := string(bytes.TrimSpace(b))
+	// 折行 base64（MIME 76 列、粘贴换行）内部含空白：先全部去掉再解码，
+	// 否则 StdEncoding 会因 \n 报错，整份配置无法识别。
+	s := string(bytes.Join(bytes.Fields(b), nil))
 	if pad := len(s) % 4; pad != 0 {
 		s += string(bytes.Repeat([]byte("="), 4-pad))
 	}

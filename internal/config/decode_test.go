@@ -42,6 +42,43 @@ func TestDecodeBareBase64(t *testing.T) {
 	}
 }
 
+// 折行 base64：长配置常被按 MIME 惯例 76 列折行（论坛粘贴、QQ 群转发），
+// 解码器应先去掉行内空白再解码，而不是整份报“无法识别”。
+func wrapBase64(t *testing.T, payload string) string {
+	t.Helper()
+	b64 := base64.StdEncoding.EncodeToString([]byte(payload))
+	var wrapped bytes.Buffer
+	for len(b64) > 76 {
+		wrapped.WriteString(b64[:76] + "\n")
+		b64 = b64[76:]
+	}
+	wrapped.WriteString(b64)
+	return wrapped.String()
+}
+
+func TestDecodeWrappedBase64(t *testing.T) {
+	payload := `{"sites":[{"key":"a","name":"站点A","type":1,"api":"http://example.com/api"}]}`
+	out, err := Decode([]byte(wrapBase64(t, payload)))
+	if err != nil {
+		t.Fatalf("折行 base64 解码失败: %v", err)
+	}
+	if !bytes.Contains(out, []byte("sites")) {
+		t.Errorf("解码结果不含预期内容: %s", out)
+	}
+}
+
+func TestDecodeWrappedStarStarBase64(t *testing.T) {
+	payload := `{"sites":[{"key":"a","name":"站点A","type":1,"api":"http://example.com/api"}]}`
+	in := []byte("jhSPAyzn**" + wrapBase64(t, payload))
+	out, err := Decode(in)
+	if err != nil {
+		t.Fatalf("折行 **base64 解码失败: %v", err)
+	}
+	if !bytes.Contains(out, []byte("sites")) {
+		t.Errorf("解码结果不含预期内容: %s", out)
+	}
+}
+
 func TestDecodeGzip(t *testing.T) {
 	var buf bytes.Buffer
 	w := gzip.NewWriter(&buf)
