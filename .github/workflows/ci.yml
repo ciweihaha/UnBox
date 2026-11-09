@@ -7,7 +7,9 @@
 # Linux 后端需要 GTK3/GTK4/WebKitGTK 开发库）；ubuntu-24.04 runner 上可直接
 # apt 安装（沙箱镜像因 libzstd1 被钉死装不上，CI 不受影响）。
 #
-# 前端 CI（npm run build / vitest）留给后续轮次，本 workflow 只做 Go 部分。
+# 前端 job（frontend）：Node 22 + npm ci → npm run build（内含 vue-tsc
+# 类型检查）→ npm test（vitest run）。为后续 Wails 升级提供前端验证手段。
+# 前端构建不需要 GTK/WebKit 系统库，故不装 Linux build deps。
 
 name: ci
 
@@ -54,3 +56,27 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
+
+  frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Test
+        working-directory: frontend
+        run: npm test
