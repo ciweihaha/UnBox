@@ -107,6 +107,37 @@ func TestControllerMPVBackendLoadsStream(t *testing.T) {
 	}
 }
 
+// TestPrepareCapsSessions 每次 Web 播放都在会话表里留一条，供 Fallback
+// 降级用；但会话只在降级或关机时清理，长期运行会无限膨胀。本测试断言
+// Prepare 超过上限后最旧的会话被淘汰，且最新会话仍能降级。
+func TestPrepareCapsSessions(t *testing.T) {
+	mpv := &fakePlayer{}
+	web := &fakeProxy{}
+	c := NewController(nil, web, mpv)
+	c.probe = func(context.Context, player.Stream) (string, error) { return "", nil }
+
+	var last Plan
+	for i := 0; i < maxPlaySessions+10; i++ {
+		plan, err := c.Prepare(context.Background(), player.Stream{URL: fmt.Sprintf("https://x/%d.mp4", i), Kind: player.StreamMP4})
+		if err != nil {
+			t.Fatalf("Prepare %d: %v", i, err)
+		}
+		last = plan
+	}
+	c.mu.Lock()
+	n := len(c.sessions)
+	c.mu.Unlock()
+	if n > maxPlaySessions {
+		t.Fatalf("Web 播放会话应有上限，得 %d 条（应 <= %d）", n, maxPlaySessions)
+	}
+	if _, err := c.Fallback(context.Background(), last.ID, 0); err != nil {
+		t.Fatalf("最新会话应能降级，got %v", err)
+	}
+	if mpv.played != 1 {
+		t.Fatalf("降级应播放一次，got %d", mpv.played)
+	}
+}
+
 func TestControllerFallbackLoadsOriginalStream(t *testing.T) {
 	proxy := &fakeProxy{}
 	mpv := &fakePlayer{}

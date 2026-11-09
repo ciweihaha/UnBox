@@ -22,6 +22,14 @@ var ErrMPVUnavailable = errors.New("mpv 插件未安装")
 // preloadWarmupTimeout 限制 mpv-only 流后台网络预热的时长。
 const preloadWarmupTimeout = 20 * time.Second
 
+// maxPlaySessions 是 Web 播放会话表的上限：会话只在降级或关机时清理，
+// 长期运行不封顶会无限膨胀；降级只用得到最近的会话，32 个绰绰有余。
+const maxPlaySessions = 32
+
+// hevcCodecPattern 匹配 HLS 清单里的 HEVC 编解码标识（包级预编译，
+// 别在每次探测时现编）。
+var hevcCodecPattern = regexp.MustCompile(`(?i)(hvc1|hev1|hevc)`)
+
 type streamResolver interface {
 	Resolve(context.Context, player.Stream) (player.Stream, error)
 }
@@ -37,6 +45,13 @@ type preloadSession struct {
 	cancel   context.CancelFunc
 }
 
+// playSession 记录一次 Web 播放会话，供 Fallback 降级用；seq 是插入顺序，
+// 供会话表满时淘汰最旧的一条。
+type playSession struct {
+	stream player.Stream
+	seq    uint64
+}
+
 // Controller 负责一次播放计划的解析、路由和 Web→mpv 降级。
 //
 // webMSE 标记 WebView 是否支持 MSE（hls.js/mpegts.js 依赖）。Linux 的
@@ -44,15 +59,16 @@ type preloadSession struct {
 // <video> 仅可靠覆盖 MP4。其余平台（Windows WebView2 / macOS WKWebView）
 // 具备 MSE 或原生 HLS，Web 能力默认为真。
 type Controller struct {
-	resolver streamResolver
-	proxy    streamProxy
-	client   *http.Client
-	mu       sync.Mutex
-	mpv      player.Player
-	sessions map[string]player.Stream
-	preloads map[string]preloadSession
-	webMSE   bool
-	probe    func(context.Context, player.Stream) (string, error)
+	resolver   streamResolver
+	proxy      streamProxy
+	client     *http.Client
+	mu         sync.Mutex
+	mpv        player.Player
+	sessions   map[string]playSession
+	sessionSeq uint64
+	preloads   map[string]preloadSession
+	webMSE     bool
+	probe      func(context.Context, player.Stream) (string, error)
 }
 
 func NewController(resolver streamResolver, proxy streamProxy, mpv player.Player) *Controller {
@@ -61,7 +77,7 @@ func NewController(resolver streamResolver, proxy streamProxy, mpv player.Player
 		proxy:    proxy,
 		client:   &http.Client{Timeout: probeTimeout},
 		mpv:      mpv,
-		sessions: make(map[string]player.Stream),
+		sessions: make(map[string]playSession),
 		preloads: make(map[string]preloadSession),
 		webMSE:   true,
 	}
@@ -110,9 +126,27 @@ func (c *Controller) Prepare(ctx context.Context, input player.Stream) (Plan, er
 	}
 	id := sessionID()
 	c.mu.Lock()
-	c.sessions[id] = cloneStream(resolved)
+	c.sessionSeq++
+	c.sessions[id] = playSession{stream: cloneStream(resolved), seq: c.sessionSeq}
+	c.evictOldSessionsLocked()
 	c.mu.Unlock()
 	return Plan{ID: id, Backend: BackendWeb, URL: proxyURL, Kind: resolved.Kind.String(), CanFallback: c.MPVReady()}, nil
+}
+
+// evictOldSessionsLocked 删掉最旧的会话，只保留最近 maxPlaySessions 个。
+// 调用时须持有 c.mu；每次 Prepare 只新增一条，扫描一次的代价可忽略。
+func (c *Controller) evictOldSessionsLocked() {
+	for len(c.sessions) > maxPlaySessions {
+		oldest := ""
+		var oldestSeq uint64
+		first := true
+		for id, s := range c.sessions {
+			if first || s.seq < oldestSeq {
+				oldest, oldestSeq, first = id, s.seq, false
+			}
+		}
+		delete(c.sessions, oldest)
+	}
 }
 
 // needsMPV 判断一条已解析的流是否只能交给 mpv 播放。
@@ -256,7 +290,7 @@ func (c *Controller) loadMPV(ctx context.Context, stream player.Stream, start fl
 // Fallback 用 mpv 重新播放 Web 失败的同一个流，并把 position 作为续播起点。
 func (c *Controller) Fallback(ctx context.Context, id string, position float64) (Plan, error) {
 	c.mu.Lock()
-	stream, ok := c.sessions[id]
+	session, ok := c.sessions[id]
 	if ok {
 		delete(c.sessions, id)
 	}
@@ -264,12 +298,12 @@ func (c *Controller) Fallback(ctx context.Context, id string, position float64) 
 	if !ok {
 		return Plan{}, errors.New("播放会话不存在或已降级")
 	}
-	return c.loadMPV(ctx, stream, position)
+	return c.loadMPV(ctx, session.stream, position)
 }
 
 func (c *Controller) Close() error {
 	c.mu.Lock()
-	c.sessions = make(map[string]player.Stream)
+	c.sessions = make(map[string]playSession)
 	preloads := c.preloads
 	c.preloads = make(map[string]preloadSession)
 	mpv := c.mpv
@@ -326,7 +360,7 @@ func (c *Controller) probeHLSCodec(ctx context.Context, stream player.Stream) (s
 	return text[idx:], nil
 }
 
-func isHEVC(codec string) bool { return regexp.MustCompile(`(?i)(hvc1|hev1|hevc)`).MatchString(codec) }
+func isHEVC(codec string) bool { return hevcCodecPattern.MatchString(codec) }
 func sessionID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
