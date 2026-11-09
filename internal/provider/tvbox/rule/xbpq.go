@@ -44,7 +44,7 @@ func (e *XBPQEngine) Browse(ctx context.Context, cat string, page int) (provider
 	if page <= 0 {
 		page = 1
 	}
-	raw, err := e.c.Get(ctx, expandURL(e.rule.CategoryURL, cat, page))
+	raw, err := e.c.Get(ctx, e.absURL(expandURL(e.rule.CategoryURL, cat, page)))
 	if err != nil {
 		return provider.Page{}, err
 	}
@@ -149,12 +149,18 @@ func (e *XBPQEngine) Resolve(ctx context.Context, epURL string) (player.Stream, 
 }
 
 // looksLikeMediaURL 判断地址是否已经是媒体文件；其余按播放页处理。
+// 扩展名与 player.KindForURL 的媒体集合保持一致：漏掉的容器（avi/mov 等）
+// 会被当成播放页先下载（客户端 4MB 上限）再兜底，白白浪费一次抓取。
 func looksLikeMediaURL(raw string) bool {
 	base := strings.ToLower(strings.TrimSpace(raw))
 	if i := strings.IndexAny(base, "?#"); i >= 0 {
 		base = base[:i]
 	}
-	for _, ext := range []string{".m3u8", ".mp4", ".m4v", ".flv", ".ts", ".m2ts", ".mkv", ".webm", ".mp3", ".m4a"} {
+	for _, ext := range []string{
+		".m3u8", ".mp4", ".m4v", ".webm", ".flv", ".ts", ".m2ts",
+		".mkv", ".avi", ".mov", ".wmv", ".rmvb", ".rm", ".mpg", ".mpeg", ".3gp", ".vob",
+		".mp3", ".m4a", ".flac", ".mflac", ".aac", ".ogg", ".opus", ".wav", ".ape", ".mgg", ".wma", ".mka",
+	} {
 		if strings.HasSuffix(base, ext) {
 			return true
 		}

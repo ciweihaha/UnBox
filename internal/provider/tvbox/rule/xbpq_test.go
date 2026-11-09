@@ -111,6 +111,64 @@ func TestXBPQResolve(t *testing.T) {
 	}
 }
 
+// looksLikeMediaURL 要认全 KindForURL 的媒体扩展名，否则直链 .avi/.mov 等
+// 会被当成播放页先下载（客户端 4MB 上限）再兜底，白白浪费一次抓取。
+func TestLooksLikeMediaURLCoversAllContainers(t *testing.T) {
+	media := []string{
+		"m3u8", "mp4", "m4v", "webm", "flv", "ts", "m2ts",
+		"mkv", "avi", "mov", "wmv", "rmvb", "rm", "mpg", "mpeg", "3gp", "vob",
+		"mp3", "m4a", "flac", "mflac", "aac", "ogg", "opus", "wav", "ape", "mgg", "wma", "mka",
+	}
+	for _, ext := range media {
+		u := "https://cdn.example.com/a." + ext
+		if !looksLikeMediaURL(u) {
+			t.Errorf("looksLikeMediaURL(%q) = false", u)
+		}
+	}
+	for _, u := range []string{
+		"https://site.example.com/play/123",
+		"https://site.example.com/v/1.html",
+		"https://cdn.example.com/a.jpg",
+		"https://cdn.example.com/a.txt",
+	} {
+		if looksLikeMediaURL(u) {
+			t.Errorf("looksLikeMediaURL(%q) = true", u)
+		}
+	}
+}
+
+// Resolve 遇到直链视频容器不应再去抓播放页：服务端收到请求即失败。
+func TestXBPQResolveDoesNotFetchDirectVideoURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("直链不应再抓取: %s", r.URL.Path)
+	}))
+	defer srv.Close()
+
+	e := NewXBPQEngine(&XBPQ{HomeURL: srv.URL + "/"}, NewClient(nil))
+	stream, err := e.Resolve(context.Background(), srv.URL+"/a.avi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stream.URL != srv.URL+"/a.avi" || stream.Kind != player.StreamVideo {
+		t.Fatalf("Resolve = %+v", stream)
+	}
+}
+
+// 分类链接是相对地址时，Browse 应以 HomeURL 为基准补全，而不是直接
+// 拿相对地址请求（XYQ 的 Browse 就是这么做的，XBPQ 漏了）。
+func TestXBPQBrowseResolvesRelativeCategoryURL(t *testing.T) {
+	e, srv := xbpqFixture(t)
+	defer srv.Close()
+	e.rule.CategoryURL = "/category/{cateId}/{catePg}"
+	page, err := e.Browse(context.Background(), "1", 1)
+	if err != nil {
+		t.Fatalf("Browse 失败: %v", err)
+	}
+	if len(page.Items) != 2 || page.Items[0].Title != "甲" {
+		t.Fatalf("Browse = %#v", page)
+	}
+}
+
 // 真实规则有两套详情字段名：影片类型/影片年代/影片地区/影片状态 与
 // 类型/年代/地区/状态。后者不能被引擎忽略。
 func TestXBPQDetailLegacyFieldAliases(t *testing.T) {
