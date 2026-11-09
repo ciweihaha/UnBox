@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/unbox/unbox/internal/player"
 	"github.com/unbox/unbox/internal/player/mpvproc"
@@ -21,9 +22,17 @@ import (
 
 const (
 	windowsURL  = "https://github.com/mpv-distributions/mpv-windows-setup/releases/download/0.41.0/mpv-setup-x86_64-0.41.0.exe"
-	windowsSHA  = "1b32d5eb7e713ecc5853c18107daffac652e29474dfd517a4ddb792dc45e40fc"
 	maxDownload = int64(80 << 20)
 )
+
+// windowsSHA 是安装包的校验和（var 而非 const，供测试注入假安装包的哈希）。
+var windowsSHA = "1b32d5eb7e713ecc5853c18107daffac652e29474dfd517a4ddb792dc45e40fc"
+
+// windowsDownloadTimeout 是 Windows 上下载 mpv 安装包的总时限。调用方传的
+// 是 context.Background()（InstallMPV 无取消入口），没有它，下载中途停滞
+// （服务器挂死、中间设备黑洞）会让安装界面无限挂起。15 分钟对 80MB 安装包
+// 足够宽松（1Mbps 也只需约 11 分钟），只防「永远等不到字节」。
+var windowsDownloadTimeout = 15 * time.Minute
 
 // executablePath 是 os.Executable 的可注入替身，供测试覆盖「应用内嵌 mpv」路径。
 var executablePath = os.Executable
@@ -119,13 +128,23 @@ func (m *Manager) NewPlayer() (player.Player, error) {
 
 func ErrUnavailable() error { return errors.New("未找到 mpv 可执行文件") }
 
+// isDownloadTimeout 判断下载错误是否由下载时限触发（超时或上层取消）。
+func isDownloadTimeout(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+}
+
 func (m *Manager) installWindows(ctx context.Context) (InstallResult, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, windowsURL, nil)
+	dlCtx, cancel := context.WithTimeout(ctx, windowsDownloadTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(dlCtx, http.MethodGet, windowsURL, nil)
 	if err != nil {
 		return InstallResult{}, err
 	}
 	resp, err := m.client.Do(req)
 	if err != nil {
+		if isDownloadTimeout(err) {
+			return InstallResult{}, errors.New("下载 mpv 安装包超时，请检查网络后重试")
+		}
 		return InstallResult{}, fmt.Errorf("下载 mpv 安装包失败: %w", err)
 	}
 	defer resp.Body.Close()
@@ -146,6 +165,9 @@ func (m *Manager) installWindows(ctx context.Context) (InstallResult, error) {
 	n, err := io.CopyN(io.MultiWriter(tmp, hash), resp.Body, maxDownload+1)
 	if err != nil && !errors.Is(err, io.EOF) {
 		_ = tmp.Close()
+		if isDownloadTimeout(err) {
+			return InstallResult{}, errors.New("下载 mpv 安装包超时，请检查网络后重试")
+		}
 		return InstallResult{}, fmt.Errorf("保存 mpv 安装包失败: %w", err)
 	}
 	if n > maxDownload {
@@ -160,6 +182,13 @@ func (m *Manager) installWindows(ctx context.Context) (InstallResult, error) {
 	}
 	if err := m.run(ctx, tmpName, "/VERYSILENT", "/CURRENTUSER", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR="+dir); err != nil {
 		return InstallResult{}, fmt.Errorf("运行 mpv 安装程序失败: %w", err)
+	}
+	// 安装程序退出码为 0 不代表 mpv 真落盘（杀软隔离、磁盘满都可能让安装
+	// 「成功」却无文件）；按 Status() 找插件的同一路径校验，缺失即报错，
+	// 否则用户会看到「安装完成」却仍播不了。
+	installed := filepath.Join(dir, exeForOS(m.goos))
+	if _, err := os.Stat(installed); err != nil {
+		return InstallResult{}, fmt.Errorf("mpv 安装完成但未找到 %s，请重新安装", installed)
 	}
 	return InstallResult{Installed: true, Message: "mpv 插件安装完成"}, nil
 }
