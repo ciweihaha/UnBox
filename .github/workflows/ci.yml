@@ -51,6 +51,16 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Staticcheck
+        # 2026-11-09 第 20 轮接入：锁定第 18–19 轮的清理成果（死代码、
+        # 空分支、包注释），防回归。
+        # -checks="all,-ST1005"：ST1005 的两处是误报（controller.go 里
+        # “Web 播放代理未就绪”的 Web 是中文界面文案专名）。
+        # 版本钉死 v0.8.2（staticcheck 2026.2.2），不用 @latest。
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+          staticcheck -checks="all,-ST1005" ./...
+
       - name: Test
         run: go test -race ./... -count=1
 
