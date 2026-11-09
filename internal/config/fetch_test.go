@@ -135,6 +135,37 @@ func TestFetchOverCapBodyRejected(t *testing.T) {
 	}
 }
 
+// TestFetchLocalFileOverCapRejected 本地文件同样受 maxDecodedSize 上限约束：
+// 误选超大文件（如视频）时不应全读进内存。
+func TestFetchLocalFileOverCapRejected(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "big.json")
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := make([]byte, 1<<20) // 1 MiB chunks to avoid a huge single allocation
+	remaining := int64(maxDecodedSize + 1)
+	for remaining > 0 {
+		n := int64(len(chunk))
+		if remaining < n {
+			n = remaining
+		}
+		if _, err := f.Write(chunk[:n]); err != nil {
+			t.Fatal(err)
+		}
+		remaining -= n
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	fetcher := NewFetcher()
+	if _, err := fetcher.Fetch(context.Background(), p); err == nil {
+		t.Fatal("超过大小上限的本地文件应当返回 error，而不是全读进内存")
+	}
+}
+
 func TestFetchNonOKStatusRejected(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

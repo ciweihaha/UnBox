@@ -61,14 +61,32 @@ func (f *Fetcher) Fetch(ctx context.Context, ref string) ([]byte, error) {
 		return f.fetchHTTP(ctx, ref)
 
 	case strings.HasPrefix(ref, "file://"):
-		return os.ReadFile(localPath(ref))
+		return readLocalFile(localPath(ref))
 
 	default:
 		if scheme, ok := unsupportedScheme(ref); ok {
 			return nil, fmt.Errorf("不支持的协议 %q，仅支持 http、https、file 及裸本地路径: %s", scheme, ref)
 		}
-		return os.ReadFile(localPath(ref))
+		return readLocalFile(localPath(ref))
 	}
+}
+
+// readLocalFile 按 maxDecodedSize 上限读本地文件，与 HTTP 路径一致：
+// 误选超大文件（如视频）时不应全读进内存。
+func readLocalFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	body, err := io.ReadAll(io.LimitReader(f, maxDecodedSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("读取本地文件失败: %w", err)
+	}
+	if len(body) > maxDecodedSize {
+		return nil, fmt.Errorf("本地文件超过 %d 字节限制: %s", maxDecodedSize, path)
+	}
+	return body, nil
 }
 
 // localPath 将 file:// URL 或裸本地路径转换为可交给 os.ReadFile 的路径。
