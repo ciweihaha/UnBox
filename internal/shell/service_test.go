@@ -1,8 +1,10 @@
 package shell
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1091,6 +1093,44 @@ func TestVodSearchAllSurvivesPanickingSite(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Title != "结果" {
 		t.Fatalf("崩溃站点应被跳过且正常站点结果保留，got %+v", items)
+	}
+}
+
+// errSearchProvider 固定返回错误的站点，用于验证全站搜索的失败可见性：
+// 站点自身失败时应记日志（而不是静默吞掉），正常站点结果不受影响。
+type errSearchProvider struct {
+	provider.Provider
+	err error
+}
+
+func (p errSearchProvider) Search(context.Context, string) ([]provider.Item, error) {
+	return nil, p.err
+}
+
+func (p errSearchProvider) BrowseFiltered(context.Context, string, int, map[string]string) (provider.Page, error) {
+	return provider.Page{}, nil
+}
+
+func TestVodSearchAllLogsFailingSite(t *testing.T) {
+	var buf bytes.Buffer
+	oldOut := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(oldOut)
+
+	svc := NewShellService(nil, nil, nil)
+	svc.vods = map[string]provider.Provider{
+		"坏站点": errSearchProvider{err: errors.New("规则解析失败")},
+		"正常":  stubSearchProvider{items: []provider.Item{{ID: "1", Title: "结果"}}},
+	}
+	items, err := svc.VodSearchAll("q")
+	if err != nil {
+		t.Fatalf("失败站点不应让整体搜索失败，got %v", err)
+	}
+	if len(items) != 1 || items[0].Title != "结果" {
+		t.Fatalf("正常站点结果应保留，got %+v", items)
+	}
+	if !strings.Contains(buf.String(), "坏站点") || !strings.Contains(buf.String(), "失败") {
+		t.Fatalf("失败站点应记日志，got %q", buf.String())
 	}
 }
 

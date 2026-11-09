@@ -1550,6 +1550,7 @@ func (s *ShellService) vodSearchAll(q string, token uint64) ([]VodItem, error) {
 	var mu sync.Mutex
 	var out []VodItem
 	var done atomic.Int64
+	var failed atomic.Int64
 	var inflight atomic.Int64
 	var wg sync.WaitGroup
 	for _, p := range providers {
@@ -1597,6 +1598,11 @@ func (s *ShellService) vodSearchAll(q string, token uint64) ([]VodItem, error) {
 				out = append(out, v...)
 				mu.Unlock()
 				s.emitSearchResults(searchID, token, q, v) // 逐步推送结果
+			} else if ctx.Err() == nil {
+				// 站点自身失败（不是搜索被新搜索取消）：记日志并计数，结尾进度里汇总；
+				// 超时失败另有“达到超时上限”一行，这里只记失败本身。
+				failed.Add(1)
+				log.Printf("全站搜索站点 %q 失败（耗时 %s）: %v", site, elapsed.Round(time.Millisecond), err)
 			}
 			finished := int(done.Add(1))
 			emitProgress(Progress{Stage: "search", Message: fmt.Sprintf("%d/%d · %d 线程", finished, total, live), Done: finished, Total: total})
@@ -1620,7 +1626,11 @@ func (s *ShellService) vodSearchAll(q string, token uint64) ([]VodItem, error) {
 		s.searchCancel = nil
 	}
 	s.mu.Unlock()
-	s.emitSearchProgress(searchID, token, q, Progress{Stage: "search", Message: "搜索完成", Done: total, Total: total})
+	doneMsg := "搜索完成"
+	if f := int(failed.Load()); f > 0 {
+		doneMsg = fmt.Sprintf("搜索完成（%d 个站点失败）", f)
+	}
+	s.emitSearchProgress(searchID, token, q, Progress{Stage: "search", Message: doneMsg, Done: total, Total: total})
 	return out, nil
 }
 
