@@ -1,0 +1,56 @@
+# UnBox 常驻 CI：push 到 master 与 pull_request 时验证 Go 代码。
+#
+# 背景：此前只有 release.yml（v* tag 才构建）和 donors.yml（每日定时），master
+# 的日常提交没有任何自动化验证。本 workflow 补上这个缺口。
+#
+# Linux 系统依赖照搬 release.yml 的 "Install Linux build deps"（Wails v3 的
+# Linux 后端需要 GTK3/GTK4/WebKitGTK 开发库）；ubuntu-24.04 runner 上可直接
+# apt 安装（沙箱镜像因 libzstd1 被钉死装不上，CI 不受影响）。
+#
+# 前端 CI（npm run build / vitest）留给后续轮次，本 workflow 只做 Go 部分。
+
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  go:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libgtk-4-dev libwebkitgtk-6.0-dev pkg-config
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -count=1
+
+      - name: Check gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "以下文件未 gofmt："
+            echo "$unformatted"
+            exit 1
+          fi
