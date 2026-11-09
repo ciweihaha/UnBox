@@ -1,7 +1,11 @@
 package rule
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -63,4 +67,66 @@ func containsStr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// 搜索关键词含 +、&、= 时，表单 POST 体里的 {wd} 必须按
+// x-www-form-urlencoded 转义，否则 &、= 会被服务端当成分隔符，+ 会被读成空格。
+func TestXYQSearchPostBodyEscapesFormQuery(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		_, _ = w.Write([]byte(`{"code":200,"data":[]}`))
+	}))
+	defer srv.Close()
+
+	e := NewXYQHikerEngine(&XYQ{
+		HomeURL:        srv.URL,
+		SearchURL:      srv.URL + "/search;post",
+		PostBody:       `wd={wd}&page=1`,
+		SearchArray:    "data",
+		SearchTitle:    "title",
+		SearchLink:     "key",
+		SearchModeJSON: "0",
+	}, NewClient(nil))
+
+	if _, err := e.Search(context.Background(), "C++&a=b"); err != nil {
+		t.Fatal(err)
+	}
+	if gotBody != "wd=C%2B%2B%26a%3Db&page=1" {
+		t.Fatalf("POST 体 = %q，期望转义后的查询", gotBody)
+	}
+}
+
+// 搜索关键词含引号/反斜杠时，JSON POST 体里的 {wd} 必须按 JSON 字符串
+// 转义，否则拼出的请求体不是合法 JSON，服务端直接拒收。
+func TestXYQSearchPostBodyEscapesJSONQuery(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		_, _ = w.Write([]byte(`{"code":200,"data":[]}`))
+	}))
+	defer srv.Close()
+
+	e := NewXYQHikerEngine(&XYQ{
+		HomeURL:        srv.URL,
+		SearchURL:      srv.URL + "/search;post",
+		PostBody:       `{"sk":"{wd}","offset":0}`,
+		SearchArray:    "data",
+		SearchTitle:    "title",
+		SearchLink:     "key",
+		SearchModeJSON: "0",
+	}, NewClient(nil))
+
+	if _, err := e.Search(context.Background(), `a"b\c`); err != nil {
+		t.Fatal(err)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(gotBody), &obj); err != nil {
+		t.Fatalf("POST 体不是合法 JSON: %q (%v)", gotBody, err)
+	}
+	if obj["sk"] != `a"b\c` {
+		t.Fatalf("sk = %v，期望原样关键词", obj["sk"])
+	}
 }

@@ -208,7 +208,7 @@ func (e *XYQHikerEngine) Search(ctx context.Context, q string) ([]provider.Item,
 	}
 	// 搜索链接可能以 ";post"/";get" 结尾声明方法（如 yingso 的 .../search;post）。
 	target, forcePost := splitMethodSuffix(xyqReplaceSearch(e.rule.SearchURL, q))
-	body := strings.NewReplacer("{wd}", q).Replace(string(e.rule.PostBody))
+	body := xyqSearchBody(string(e.rule.PostBody), q)
 	usePost := forcePost || strings.TrimSpace(body) != ""
 
 	var raw string
@@ -233,6 +233,26 @@ func (e *XYQHikerEngine) Search(ctx context.Context, q string) ([]provider.Item,
 		e.rule.SearchTitle, e.rule.SearchLink, e.rule.SearchPic, e.rule.SearchSubtitle,
 		e.rule.SearchPrefix, e.rule.SearchSuffix)
 	return items, nil
+}
+
+// xyqSearchBody 替换 POST 请求体里的 {wd} 占位符：JSON 体按 JSON 字符串
+// 转义（关键词含引号/反斜杠会打断 JSON），表单体按 x-www-form-urlencoded
+// 转义（+、&、= 会被服务端当成分隔符/空格）。模板形态决定转义方式；
+// 普通关键词两种转义都是原样，旧规则不受影响。
+func xyqSearchBody(template, q string) string {
+	if strings.HasPrefix(strings.TrimSpace(template), "{") {
+		return strings.NewReplacer("{wd}", jsonEscape(q)).Replace(template)
+	}
+	return strings.NewReplacer("{wd}", url.QueryEscape(q)).Replace(template)
+}
+
+// jsonEscape 转义 JSON 字符串的内容（不含两侧引号）。
+func jsonEscape(s string) string {
+	b, _ := json.Marshal(s)
+	if len(b) < 2 {
+		return s
+	}
+	return string(b[1 : len(b)-1])
 }
 
 // splitMethodSuffix 拆出搜索链接尾部的 ";post"/";get" 方法声明。
