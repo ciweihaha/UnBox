@@ -3,7 +3,9 @@ package library
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -51,7 +53,11 @@ func (s *server) register(path string) string {
 		if err == nil {
 			s.ln = ln
 			go func() {
-				_ = http.Serve(ln, s.handler())
+				if err := http.Serve(ln, s.handler()); err != nil && !errors.Is(err, http.ErrServerClosed) && !strings.Contains(err.Error(), "use of closed network connection") {
+					// 正常关闭是 close() 直接关 listener，走 "use of closed network
+					// connection" 分支（与 close() 里的判定一致），不记错误。
+					log.Printf("本地媒体服务退出异常: %v", err)
+				}
 			}()
 		}
 	}

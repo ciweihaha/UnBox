@@ -516,7 +516,9 @@ func (s *ShellService) ImportLiveSource(ref string) (ImportResult, error) {
 // addSource 记录一条导入源（按 kind）。
 func (s *ShellService) addSource(kind, ref string) {
 	if s.store != nil {
-		_ = s.store.AddSource(kind, ref)
+		if err := s.store.AddSource(kind, ref); err != nil {
+			log.Printf("记录导入源失败 kind=%s ref=%s: %v", kind, ref, err)
+		}
 	}
 }
 
@@ -703,7 +705,9 @@ func (s *ShellService) saveSubscription() {
 	if err != nil {
 		return
 	}
-	_ = s.store.SetKV(subscriptionKey, string(b))
+	if err := s.store.SetKV(subscriptionKey, string(b)); err != nil {
+		log.Printf("保存订阅快照失败: %v", err)
+	}
 }
 
 // RestoreSubscription 从 store 恢复上次导入的订阅快照并重建状态。
@@ -743,10 +747,14 @@ func (s *ShellService) RestoreSubscription() (ImportResult, error) {
 		liveCFGs = sub.CFGs
 	}
 	if vodRef != "" {
-		_ = s.store.AddSource("vod", vodRef)
+		if err := s.store.AddSource("vod", vodRef); err != nil {
+			log.Printf("恢复订阅登记点播源失败 ref=%s: %v", vodRef, err)
+		}
 	}
 	if liveRef != "" {
-		_ = s.store.AddSource("live", liveRef)
+		if err := s.store.AddSource("live", liveRef); err != nil {
+			log.Printf("恢复订阅登记直播源失败 ref=%s: %v", liveRef, err)
+		}
 	}
 
 	// 恢复后重新解析相对 api/ext。对已解析过的绝对地址是幂等的
@@ -1133,7 +1141,10 @@ func (s *ShellService) PlayChannel(id string) error {
 	}
 	if s.store != nil {
 		if m, err := pv.Detail(context.Background(), id); err == nil {
-			_ = s.store.AddRecent(id, m.Title, m.Group, st.URL) // 尽力而为，失败不阻断播放
+			// 尽力而为，失败不阻断播放
+			if err := s.store.AddRecent(id, m.Title, m.Group, st.URL); err != nil {
+				log.Printf("记录最近播放失败 id=%s: %v", id, err)
+			}
 		}
 	}
 	return s.player.Play()

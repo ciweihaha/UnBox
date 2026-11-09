@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net"
 	"net/http"
@@ -144,7 +145,10 @@ func (p *Proxy) startLocked() error {
 	p.listener = listener
 	p.server = &http.Server{Handler: http.HandlerFunc(p.serveHTTP), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
-		_ = p.server.Serve(listener)
+		// 正常关闭是 Close() 调 server.Close()，Serve 返回 ErrServerClosed，不记错误。
+		if err := p.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("播放代理服务退出异常: %v", err)
+		}
 	}()
 	return nil
 }

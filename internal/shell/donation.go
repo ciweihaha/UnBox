@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"time"
@@ -142,7 +143,9 @@ func (s *ShellService) writeDonationCache(entry donationCacheEntry, cachedAt int
 	if err != nil {
 		return
 	}
-	_ = s.store.SetKV(donationCacheKey, string(raw))
+	if err := s.store.SetKV(donationCacheKey, string(raw)); err != nil {
+		log.Printf("保存捐助榜单缓存失败: %v", err)
+	}
 }
 
 func donationCacheFresh(entry donationCacheEntry, now time.Time) bool {

@@ -5,6 +5,7 @@ package failover
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -106,7 +107,11 @@ func (p *Player) switchToNext() {
 	next := p.candidates[p.index]
 	s := p.stream
 	p.mu.Unlock()
-	_ = p.inner.Load(context.Background(), streamWith(s, next))
+	// switchToNext 由后台事件循环调用，Load 失败无法回传给任何调用方；
+	// 仅记日志，仍不改行为（下一次终端事件会再尝试切到下一条）。
+	if err := p.inner.Load(context.Background(), streamWith(s, next)); err != nil {
+		log.Printf("故障切换加载备用源失败 url=%s: %v（切源由后台事件循环触发，失败无法回传给调用方）", next, err)
+	}
 }
 
 func (p *Player) Load(ctx context.Context, s player.Stream) error {

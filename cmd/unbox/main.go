@@ -52,6 +52,8 @@ func appDataPath() string {
 		dir = "."
 	}
 	p := filepath.Join(dir, "unbox")
-	_ = os.MkdirAll(p, 0o755)
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		log.Printf("创建配置目录失败 path=%s: %v", p, err)
+	}
 	return filepath.Join(p, "unbox.db")
 }
