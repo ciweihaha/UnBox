@@ -95,6 +95,20 @@ func TestControllerHEVCHLSRoutesToMPV(t *testing.T) {
 	}
 }
 
+// TestControllerVideoContainerRoutesToMPV 浏览器播不了的视频容器
+// （mkv/avi 等）应直接走 mpv，而不是按 HLS 兜底走 Web 再失败。
+func TestControllerVideoContainerRoutesToMPV(t *testing.T) {
+	mpv := &fakePlayer{}
+	c := NewController(nil, &fakeProxy{}, mpv)
+	plan, err := c.Prepare(context.Background(), player.Stream{URL: "https://cdn.example.com/a.mkv", Kind: player.StreamVideo})
+	if err != nil || plan.Backend != BackendMPV {
+		t.Fatalf("mkv 应路由到 mpv: plan=%+v err=%v", plan, err)
+	}
+	if len(mpv.loaded) != 1 || mpv.played != 1 {
+		t.Fatalf("mpv 后端未真正加载: loaded=%d played=%d", len(mpv.loaded), mpv.played)
+	}
+}
+
 func TestControllerMPVBackendLoadsStream(t *testing.T) {
 	mpv := &fakePlayer{}
 	c := NewController(nil, &fakeProxy{}, mpv)

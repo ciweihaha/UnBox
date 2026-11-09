@@ -21,6 +21,7 @@ const (
 	StreamRTMP
 	StreamLocal // 本地文件或本地代理地址
 	StreamAudio // 音频直链（flac/m4a/mp3 等），交给 mpv 按内容播放
+	StreamVideo // 浏览器播不了的视频容器（mkv/avi/mov 等），交给 mpv 播放
 )
 
 func (k StreamKind) String() string {
@@ -39,6 +40,8 @@ func (k StreamKind) String() string {
 		return "local"
 	case StreamAudio:
 		return "audio"
+	case StreamVideo:
+		return "video"
 	default:
 		return "unknown"
 	}
@@ -58,17 +61,28 @@ func KindForURL(rawURL string) StreamKind {
 	}
 	path := strings.ToLower(u.Path)
 	switch {
-	case strings.HasSuffix(path, ".mp4"), strings.HasSuffix(path, ".m4v"):
+	case strings.HasSuffix(path, ".mp4"), strings.HasSuffix(path, ".m4v"),
+		strings.HasSuffix(path, ".webm"):
+		// webm 浏览器原生可播，与 mp4 同等走 Web（本地库同款处理）。
 		return StreamMP4
 	case strings.HasSuffix(path, ".flv"):
 		return StreamFLV
 	case strings.HasSuffix(path, ".ts"), strings.HasSuffix(path, ".m2ts"):
 		return StreamTS
+	case strings.HasSuffix(path, ".mkv"), strings.HasSuffix(path, ".avi"),
+		strings.HasSuffix(path, ".mov"), strings.HasSuffix(path, ".wmv"),
+		strings.HasSuffix(path, ".rmvb"), strings.HasSuffix(path, ".rm"),
+		strings.HasSuffix(path, ".mpg"), strings.HasSuffix(path, ".mpeg"),
+		strings.HasSuffix(path, ".3gp"), strings.HasSuffix(path, ".vob"):
+		// 浏览器播不了的视频容器：不能按未知流兜底成 HLS 走 Web
+		// （探测不到 CODECS 会误判，最终播失败），交给 mpv 按内容播放。
+		return StreamVideo
 	case strings.HasSuffix(path, ".flac"), strings.HasSuffix(path, ".mflac"),
 		strings.HasSuffix(path, ".mp3"), strings.HasSuffix(path, ".m4a"),
 		strings.HasSuffix(path, ".aac"), strings.HasSuffix(path, ".ogg"),
 		strings.HasSuffix(path, ".opus"), strings.HasSuffix(path, ".wav"),
-		strings.HasSuffix(path, ".ape"), strings.HasSuffix(path, ".mgg"):
+		strings.HasSuffix(path, ".ape"), strings.HasSuffix(path, ".mgg"),
+		strings.HasSuffix(path, ".wma"), strings.HasSuffix(path, ".mka"):
 		// 音频直链按内容交给 mpv 播放；mflac/mgg 是酷我/QQ音乐的私有
 		// 加密容器，浏览器编解码器不认，绝不能误当 HLS 走 Web。
 		return StreamAudio

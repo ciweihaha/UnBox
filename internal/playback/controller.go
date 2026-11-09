@@ -153,8 +153,9 @@ func (c *Controller) evictOldSessionsLocked() {
 func (c *Controller) needsMPV(ctx context.Context, resolved player.Stream) bool {
 	// 音频直链：交 mpv 按内容播放（mflac 等私有加密容器浏览器解不了，
 	// 标准音频也应统一走 mpv 避免 Web 端解码不一致）。RTMP / 本地文件
-	// Web 永远播不了，只能 mpv。
-	if resolved.Kind == player.StreamAudio || resolved.Kind == player.StreamRTMP || resolved.Kind == player.StreamLocal {
+	// Web 永远播不了，只能 mpv。浏览器播不了的视频容器（mkv/avi 等）
+	// 同样只能 mpv，别按 HLS 兜底走 Web。
+	if resolved.Kind == player.StreamAudio || resolved.Kind == player.StreamRTMP || resolved.Kind == player.StreamLocal || resolved.Kind == player.StreamVideo {
 		return true
 	}
 	// WebView 无 MSE 时，HLS/FLV/TS 依赖 hls.js/mpegts.js 均不可用，只有
