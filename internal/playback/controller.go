@@ -347,9 +347,11 @@ func (c *Controller) probeHLSCodec(ctx context.Context, stream player.Stream) (s
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("HLS 探测失败: HTTP %d", resp.StatusCode)
 	}
-	buf := make([]byte, 64<<10)
-	n, _ := resp.Body.Read(buf)
-	text := string(buf[:n])
+	// 清单可能分块到达：单次 Read 只返回已到的第一个段，CODECS 常在后面的
+	// 段里，读不全会把 HEVC 误判成普通 HLS 走 Web。读满 64KB 上限再判定；
+	// 读错也按无编码处理（探测失败 fail-open 到 Web，与之前一致）。
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	text := string(body)
 	if !strings.Contains(text, "#EXT-X-STREAM-INF") {
 		return "", nil
 	}

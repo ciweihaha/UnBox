@@ -205,6 +205,35 @@ func TestControllerRequiresMPVForRTMP(t *testing.T) {
 
 // TestControllerPreloadWebUsesIsolatedSession 预载 Web 流应注册独立代理会话：
 // 不进入正常播放会话表，也不触碰共享播放器。
+// TestProbeHLSCodecReadsChunkedPlaylist 探测只做一次 Body.Read 时，分块
+// 传输的首个段可能只含清单头部、CODECS 还在后面的段里：单次 Read
+// 拿不到完整清单，HEVC 会被误判成普通 HLS 走 Web，浏览器播不了。
+// 修复后应读满 64KB 上限再判定。
+func TestProbeHLSCodecReadsChunkedPlaylist(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Error("ResponseWriter 不支持 Flush")
+			return
+		}
+		fmt.Fprint(w, "#EXTM3U\n#EXT-X-VERSION:3\n") // 第一块：只有头部，没有 CODECS
+		flusher.Flush()
+		time.Sleep(100 * time.Millisecond) // 让客户端的首次 Read 只拿到第一块
+		fmt.Fprint(w, "#EXT-X-STREAM-INF:BANDWIDTH=8000000,CODECS=\"hvc1.1.6.L120.90\"\nhttps://cdn/x/1080.m3u8\n")
+	}))
+	defer upstream.Close()
+
+	c := NewController(nil, &fakeProxy{}, &fakePlayer{})
+	codec, err := c.probeHLSCodec(context.Background(), player.Stream{URL: upstream.URL + "/master.m3u8", Kind: player.StreamHLS})
+	if err != nil {
+		t.Fatalf("probeHLSCodec: %v", err)
+	}
+	if !isHEVC(codec) {
+		t.Fatalf("应识别出 HEVC 编码，got %q", codec)
+	}
+}
+
 func TestControllerPreloadWebUsesIsolatedSession(t *testing.T) {
 	mpv := &fakePlayer{}
 	web := &fakeProxy{}
