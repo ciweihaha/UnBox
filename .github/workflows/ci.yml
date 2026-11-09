@@ -9,7 +9,13 @@
 #
 # 前端 job（frontend）：Node 22 + npm ci → npm run build（内含 vue-tsc
 # 类型检查）→ npm test（vitest run）。为后续 Wails 升级提供前端验证手段。
-# 前端构建不需要 GTK/WebKit 系统库，故不装 Linux build deps。
+#
+# 前端源码 import 的 `frontend/bindings/` 是 `wails3 generate bindings -ts`
+# 的生成物（.gitignore，不入库），`vue-tsc` 没有它会报 TS2307。仓库自己的
+# 构建链（build/Taskfile.yml 的 build 任务）也是先跑 generate:bindings 再
+# 跑 `npm run build`，所以本 job 在构建前同样先生成 bindings（与发版一致
+# 用 `-tags server,production`）；生成过程要加载 internal/shell 等 GUI 包，
+# 故同样需要 GTK/WebKit 系统库与 wails3 CLI（版本与 release.yml 一致）。
 
 name: ci
 
@@ -61,6 +67,23 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libgtk-4-dev libwebkitgtk-6.0-dev pkg-config
+
+      - name: Install wails3 CLI
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
+
+      - name: Generate frontend bindings
+        run: wails3 generate bindings -f '-tags server,production' -clean=true -ts -i ./...
 
       - name: Setup Node
         uses: actions/setup-node@v4
