@@ -33,6 +33,23 @@ func TestNewHomeAndBrowse(t *testing.T) {
 	}
 }
 
+// TestBrowseNegativePage 负页码不应 panic（前端 page 原样传入），应按第 0 页返回。
+func TestBrowseNegativePage(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("负页码不应 panic: %v", r)
+		}
+	}()
+	p := New(sampleChannels())
+	pg, err := p.Browse(context.Background(), "", -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pg.Items) != 2 {
+		t.Fatalf("负页码应按第 0 页返回，got %d 条", len(pg.Items))
+	}
+}
+
 func TestResolveBackups(t *testing.T) {
 	p := New(sampleChannels())
 	id := "央视/CCTV-1"

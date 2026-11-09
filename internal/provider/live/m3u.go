@@ -16,6 +16,11 @@ type Entry struct {
 	ID    string // tvg-id
 }
 
+// maxM3ULineBytes 是播放列表单行的上限：bufio.Scanner 默认只认 64KB，
+// 超长行会让 Scan 直接停掉、静默丢掉该行之后的所有频道。1MB 远超任何
+// 合理行长（#EXTINF 属性/logo、长 URL），同时仍防无界行撑爆内存。
+const maxM3ULineBytes = 1 << 20
+
 // ParseM3U 解析 #EXTM3U 播放列表。#EXTINF 行中的 tvg-id / tvg-logo /
 // group-title 属性被提取，逗号后的标题作为 Name。容错：剥 BOM、容忍
 // CRLF、跳过空行与 # 注释行、无 #EXTINF 前导的 URL 跳过、#EXTINF 后
@@ -23,6 +28,7 @@ type Entry struct {
 func ParseM3U(raw []byte) []Entry {
 	raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf"))
 	sc := bufio.NewScanner(bytes.NewReader(raw))
+	sc.Buffer(make([]byte, 64<<10), maxM3ULineBytes)
 	var out []Entry
 	var cur *Entry // 当前待配对 URL 的 #EXTINF
 	for sc.Scan() {
@@ -87,6 +93,7 @@ func attr(s, key string) string {
 func ParseTXT(raw []byte) []Entry {
 	raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf"))
 	sc := bufio.NewScanner(bytes.NewReader(raw))
+	sc.Buffer(make([]byte, 64<<10), maxM3ULineBytes)
 	var out []Entry
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())

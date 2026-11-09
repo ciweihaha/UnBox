@@ -2,6 +2,7 @@ package live
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -39,6 +40,31 @@ func TestParseM3UMissingURLDropsEntry(t *testing.T) {
 	got := ParseM3U(raw)
 	if len(got) != 1 || got[0].URL != "http://x/ok" {
 		t.Fatalf("ParseM3U = %#v, want 1 条", got)
+	}
+}
+
+// TestParseM3ULongLine 单行超过 bufio.Scanner 默认 64KB 上限时，解析不应
+// 静默丢掉该行之后的所有频道（超长行常见于带巨大 logo 参数的 #EXTINF）。
+func TestParseM3ULongLine(t *testing.T) {
+	longLogo := strings.Repeat("x", 100<<10)
+	raw := []byte("#EXTM3U\n" +
+		"#EXTINF:-1 tvg-logo=\"" + longLogo + "\",超长行频道\n" +
+		"http://x/long\n" +
+		"#EXTINF:-1,正常频道\n" +
+		"http://x/ok\n")
+	got := ParseM3U(raw)
+	if len(got) != 2 || got[1].Name != "正常频道" {
+		t.Fatalf("ParseM3U = %#v, want 2 条且第二条为正常频道", got)
+	}
+}
+
+// TestParseTXTLongLine 同上：TXT 里一行超长也不应丢掉后面的行。
+func TestParseTXTLongLine(t *testing.T) {
+	longName := strings.Repeat("x", 100<<10)
+	raw := []byte(longName + ",http://x/long\n正常频道,http://x/ok\n")
+	got := ParseTXT(raw)
+	if len(got) != 2 || got[1].Name != "正常频道" {
+		t.Fatalf("ParseTXT = %#v, want 2 条且第二条为正常频道", got)
 	}
 }
 

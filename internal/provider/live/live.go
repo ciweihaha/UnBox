@@ -67,6 +67,9 @@ func (p *Provider) Browse(ctx context.Context, cat string, page int) (provider.P
 
 // BrowseFiltered 直播频道不参与点播筛选，忽略 filters。
 func (p *Provider) BrowseFiltered(ctx context.Context, cat string, page int, _ map[string]string) (provider.Page, error) {
+	if page < 0 {
+		page = 0 // 前端 page 原样传入，负数会在切片时 panic，按第 0 页处理
+	}
 	var items []provider.Item
 	for _, ch := range p.channels {
 		if cat != "" && cat != "*" && ch.Group != cat {
