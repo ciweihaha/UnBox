@@ -3,6 +3,7 @@ package tvbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -306,7 +307,18 @@ func (p *Spider) Resolve(ctx context.Context, epID string) (player.Stream, error
 	p.engine.SetContext(ctx)
 	playURL, err := p.engine.VodPlay(episode.Source, episode.URL)
 	p.mu.Unlock()
-	if err == nil && strings.TrimSpace(playURL) != "" {
+	if err != nil {
+		// 只有“根本没有播放动作”（既无 playerContent 之类函数，也无 rule）
+		// 才回退原始地址：命令式脚本常把直链直接放在 vod_play_url 里，
+		// 回退它才能播。有解析动作但执行失败时（JS 抛错、lazy 失败、
+		// 返回格式错误），原始地址只是待解析的相对路径，静默回退只会
+		// 让下游报误导性的“未找到真实播放地址”，直接返回真正原因。
+		var noRuleErr *crawler.NoRuleError
+		if !errors.As(err, &noRuleErr) {
+			return player.Stream{}, fmt.Errorf("播放解析失败: %w", err)
+		}
+	}
+	if strings.TrimSpace(playURL) != "" {
 		episode.URL = playURL
 	}
 	return player.Stream{URL: episode.URL, Kind: kindForURL(episode.URL), Headers: map[string]string{"Referer": originOf(spiderScriptURL(p.site))}}, nil

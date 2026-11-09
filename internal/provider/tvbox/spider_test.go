@@ -67,6 +67,31 @@ function detail(id){ return {vod_id:id,vod_name:"甲",vod_pic:"https://example.c
 	}
 }
 
+// TestSpiderResolveReportsPlayError 播放解析（playerContent/lazy）失败时，
+// Resolve 应把真正的错误报给上层，而不是静默返回详情里的原始地址——
+// 原始地址通常只是待解析的相对路径，下游播到它时只会报“未找到真实播放地址”，
+// 真正的原因就丢了。
+func TestSpiderResolveReportsPlayError(t *testing.T) {
+	script := `
+function detail(id){ return {vod_id:id,vod_name:"甲",vod_pic:"",vod_play_from:"线路一",vod_play_url:"第01集$/play/123"} }
+function playerContent(flag, id, vipFlags){ throw new Error("解析服务不可用"); }
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(script)) }))
+	defer srv.Close()
+
+	p, err := NewSpider(config.Site{Key: "s1", Name: "示例站", Type: config.SiteTypeSpider, API: srv.URL + "/spider.js"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	media, err := p.Detail(context.Background(), "1")
+	if err != nil || len(media.Episodes) != 1 {
+		t.Fatalf("Detail=%+v err=%v", media, err)
+	}
+	if _, err := p.Resolve(context.Background(), media.Episodes[0].ID); err == nil {
+		t.Fatal("播放解析失败时 Resolve 应返回错误，而不是静默返回原始地址")
+	}
+}
+
 func TestSpiderScriptURL(t *testing.T) {
 	cases := []struct {
 		name string

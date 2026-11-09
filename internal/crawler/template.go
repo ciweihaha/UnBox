@@ -567,8 +567,20 @@ func parsePositiveIndex(value string) (int, error) {
 	return n, err
 }
 
-// noRuleError 在脚本既没有可调用的动作函数、也没有声明式 rule 时给出可定位的错误。
+// NoRuleError 表示脚本既没有可调用的动作函数、也没有声明式 rule 对象。
 // 单独报「爬虫未定义 rule 对象」分不清是脚本缺动作还是配置写错了站点类型。
+// 导出类型供调用方区分：播放解析拿不到动作时，原始地址是唯一的候选
+// （命令式脚本常把直链直接放在 vod_play_url 里），应回退原始地址而不是报错。
+type NoRuleError struct {
+	Action  string
+	Actions string
+}
+
+func (e *NoRuleError) Error() string {
+	return fmt.Sprintf("该站点脚本没有提供%s动作（%s），也没有声明式 rule 对象：可能是脚本改版或站点类型配置错误", e.Action, e.Actions)
+}
+
+// noRuleError 在脚本既没有可调用的动作函数、也没有声明式 rule 时给出可定位的错误。
 func noRuleError(action, actions string) error {
-	return fmt.Errorf("该站点脚本没有提供%s动作（%s），也没有声明式 rule 对象：可能是脚本改版或站点类型配置错误", action, actions)
+	return &NoRuleError{Action: action, Actions: actions}
 }
