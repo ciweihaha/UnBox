@@ -1495,9 +1495,9 @@ func (s *ShellService) searchSiteSkipped(site string, now time.Time) bool {
 	return false
 }
 
-// searchID 字段用 map 装 vods 时，站点 key 即 provider 标识。
 // VodSearchAll 全站搜索点播，返回结果带所属站点（Site 字段）。
 // 并发度由 SearchThreads 控制，进度经 search:progress 事件推给前端。
+// searchID 字段用 map 装 vods 时，站点 key 即 provider 标识。
 func (s *ShellService) VodSearchAll(q string) ([]VodItem, error) {
 	return s.vodSearchAll(q, 0)
 }
