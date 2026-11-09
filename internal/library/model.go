@@ -62,6 +62,11 @@ func displayName(path string) string {
 		return base
 	}
 	if marker != "" {
+		// 整个文件名就是季集标记（如 S01E01.mkv）时，回落的 stem 与标记相同，
+		// 不再追加后缀，避免 "S01E01 · S01E01"；返回已规整过的标记本身。
+		if strings.EqualFold(strings.TrimSpace(stem), marker) {
+			return marker
+		}
 		return stem + " · " + marker
 	}
 	return stem

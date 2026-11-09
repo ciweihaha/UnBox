@@ -34,6 +34,11 @@ func TestDisplayName(t *testing.T) {
 		"/mnt/f/迅雷下载/groud.38664d3a.mp4":                        "groud.38664d3a",
 		// 清洗后无可用片名时回落到原 stem
 		"/mnt/f/迅雷下载/[字幕组].mp4": "[字幕组]",
+		// 整个文件名就是季集标记：不追加后缀，避免 "S01E01 · S01E01"
+		"/mnt/剧/S01E01.mkv": "S01E01",
+		"/mnt/剧/E01.mkv":    "E01",
+		"/mnt/剧/第03集.mp4":   "第03集",
+		"/mnt/剧/s01e01.mkv": "S01E01",
 	}
 	for path, want := range cases {
 		if got := displayName(path); got != want {
