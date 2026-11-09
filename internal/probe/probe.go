@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -16,6 +17,10 @@ const probeTimeout = time.Second
 
 // sampleBytes 是吞吐采样读取量：读到这么多字节就停止，足够区分快慢源。
 const sampleBytes = 128 * 1024
+
+// maxRankConcurrency 是 Rank 并行探测的上限：备用源列表通常不到 10 条，
+// 8 路并发足够，太多并发只会给源站造成无意义的突发连接。
+const maxRankConcurrency = 8
 
 // Result 是一次测速的结果。
 type Result struct {
@@ -71,6 +76,8 @@ func (p *Prober) Probe(ctx context.Context, url string, headers map[string]strin
 
 // Rank 对 URL 列表测速并排序：可达优先，其次吞吐降序，再次延迟升序。
 // 单条 URL 直接返回（不探测）。测速失败的源排到末尾（保留原始相对顺序）。
+// 各 URL 并行探测（单条仍有 1s 超时兜底）：串行时 N 个备用源要 N 秒，
+// failover.Load 每次播放都等 Rank 结果；并行后耗时接近最慢的一条。
 func (p *Prober) Rank(ctx context.Context, urls []string, headers map[string]string) []string {
 	if len(urls) <= 1 {
 		return append([]string(nil), urls...)
@@ -80,9 +87,18 @@ func (p *Prober) Rank(ctx context.Context, urls []string, headers map[string]str
 		res Result
 	}
 	items := make([]scored, len(urls))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxRankConcurrency)
 	for i, u := range urls {
-		items[i] = scored{url: u, res: p.Probe(ctx, u, headers)}
+		wg.Add(1)
+		go func(i int, u string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			items[i] = scored{url: u, res: p.Probe(ctx, u, headers)}
+		}(i, u)
 	}
+	wg.Wait()
 	sort.SliceStable(items, func(i, j int) bool {
 		ri, rj := items[i].res, items[j].res
 		if ri.Reachable != rj.Reachable {

@@ -48,6 +48,39 @@ func TestRankSingleURLUnchanged(t *testing.T) {
 	}
 }
 
+// TestRankProbesConcurrently 备用源测速应并行：串行时 4 个各慢 500ms 的源
+// 要 2 秒才排好序（播放加载直接等 Rank 结果），并行应接近单次延迟。
+func TestRankProbesConcurrently(t *testing.T) {
+	const n = 4
+	const delay = 500 * time.Millisecond
+	urls := make([]string, 0, n)
+	var servers []*httptest.Server
+	for i := 0; i < n; i++ {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(delay)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("x"))
+		}))
+		servers = append(servers, srv)
+		urls = append(urls, srv.URL)
+	}
+	defer func() {
+		for _, srv := range servers {
+			srv.Close()
+		}
+	}()
+	start := time.Now()
+	got := NewProber().Rank(context.Background(), urls, nil)
+	elapsed := time.Since(start)
+	if len(got) != n {
+		t.Fatalf("Rank = %v", got)
+	}
+	// 串行下限约 n*delay=2s；并行应接近单次 delay。阈值 1.5s 留足余量。
+	if elapsed >= 1500*time.Millisecond {
+		t.Fatalf("Rank 疑似串行测速，4 个 500ms 源耗时 %v", elapsed)
+	}
+}
+
 func TestProbeBoundsTimeout(t *testing.T) {
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(3 * time.Second)
