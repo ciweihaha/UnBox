@@ -482,3 +482,20 @@ func (s *Store) ListLibraryItems() ([]LibraryItem, error) {
 	}
 	return out, rows.Err()
 }
+
+// GetLibraryItem 按路径取单条媒体库条目（path 是主键，走点查；别为
+// 查一条海报就全表 ListLibraryItems——进度每 10 秒记一次，全表扫太贵）。
+func (s *Store) GetLibraryItem(path string) (LibraryItem, bool, error) {
+	var it LibraryItem
+	var poster sql.NullString
+	err := s.db.QueryRow(`SELECT path,name,dir,ext,size,mtime,poster FROM library_items WHERE path=?`, path).
+		Scan(&it.Path, &it.Name, &it.Dir, &it.Ext, &it.Size, &it.MTime, &poster)
+	if err == sql.ErrNoRows {
+		return LibraryItem{}, false, nil
+	}
+	if err != nil {
+		return LibraryItem{}, false, err
+	}
+	it.Poster = poster.String
+	return it, true, nil
+}

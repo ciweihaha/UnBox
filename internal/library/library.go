@@ -104,12 +104,14 @@ func (l *Library) Scan() (ScanResult, error) {
 		return ScanResult{}, err
 	}
 	var result ScanResult
+	// 旧快照只取一次：以前每处理一个目录都全表查一次，目录一多就是 N 次全表扫；
+	// 各目录的 previous 只取本目录的行，而替换只动当前目录的行，快照提前取结果相同。
+	allPrevious, err := l.store.ListLibraryItems()
+	if err != nil {
+		return result, err
+	}
 	for _, dir := range dirs {
 		result.Dirs++
-		allPrevious, err := l.store.ListLibraryItems()
-		if err != nil {
-			return result, err
-		}
 		previous := make([]store.LibraryItem, 0, len(allPrevious))
 		for _, item := range allPrevious {
 			if item.Dir == dir.Path {
@@ -211,16 +213,11 @@ func (l *Library) RecordProgress(path string, progress, duration int) error {
 	if err != nil {
 		return err
 	}
-	items, err := l.store.ListLibraryItems()
-	if err != nil {
-		return err
-	}
 	var poster string
-	for _, item := range items {
-		if item.Path == absolute {
-			poster = item.Poster
-			break
-		}
+	if item, ok, err := l.store.GetLibraryItem(absolute); err != nil {
+		return err
+	} else if ok {
+		poster = item.Poster
 	}
 	if previous, ok, err := l.store.GetVodHistory("local", absolute); err != nil {
 		return err

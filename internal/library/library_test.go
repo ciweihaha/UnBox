@@ -53,6 +53,100 @@ func TestLibraryScanAndList(t *testing.T) {
 	}
 }
 
+// TestLibraryScanMultipleDirs 多目录扫描：各目录的增删计数应独立正确，
+// 第二次扫描删掉其中一个目录的文件时，另一个目录的条目不受影响。
+func TestLibraryScanMultipleDirs(t *testing.T) {
+	root1 := t.TempDir()
+	root2 := t.TempDir()
+	for _, p := range []string{
+		filepath.Join(root1, "a.mp4"),
+		filepath.Join(root1, "b.mp4"),
+		filepath.Join(root2, "c.mp4"),
+	} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	st := openLibraryTest(t)
+	defer st.Close()
+	lib := New(st)
+	if err := lib.AddDir(root1); err != nil {
+		t.Fatal(err)
+	}
+	if err := lib.AddDir(root2); err != nil {
+		t.Fatal(err)
+	}
+	res, err := lib.Scan()
+	if err != nil || res.Dirs != 2 || res.Added != 3 {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	items, err := lib.List()
+	if err != nil || len(items) != 3 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+
+	if err := os.Remove(filepath.Join(root2, "c.mp4")); err != nil {
+		t.Fatal(err)
+	}
+	res, err = lib.Scan()
+	if err != nil || res.Removed != 1 || res.Added != 0 {
+		t.Fatalf("res after removal=%+v err=%v", res, err)
+	}
+	items, err = lib.List()
+	if err != nil || len(items) != 2 {
+		t.Fatalf("items after removal=%+v err=%v", items, err)
+	}
+	for _, it := range items {
+		if it.Dir != root1 {
+			t.Fatalf("只应剩 root1 的条目，got %+v", it)
+		}
+	}
+}
+
+// TestLibraryRecordProgressFindsPosterAmongMany 记录进度时只应取当前
+// 文件自己的海报，而不是库里任意一张（多条目时尤其要分清）。
+func TestLibraryRecordProgressFindsPosterAmongMany(t *testing.T) {
+	root := t.TempDir()
+	movie1 := filepath.Join(root, "one.mp4")
+	movie2 := filepath.Join(root, "two.mp4")
+	for _, p := range []string{movie1, movie2, filepath.Join(root, "one-poster.jpg"), filepath.Join(root, "two-poster.jpg")} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	st := openLibraryTest(t)
+	defer st.Close()
+	lib := New(st)
+	if err := lib.AddDir(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lib.Scan(); err != nil {
+		t.Fatal(err)
+	}
+	var wantPoster string
+	items, err := lib.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range items {
+		if it.Path == movie2 {
+			wantPoster = it.Poster
+		}
+	}
+	if wantPoster == "" {
+		t.Fatal("two.mp4 扫描后应有海报")
+	}
+	if err := lib.RecordProgress(movie2, 42, 100); err != nil {
+		t.Fatal(err)
+	}
+	h, err := st.ListVodHistory(10)
+	if err != nil || len(h) != 1 || h[0].VodLogo != wantPoster {
+		t.Fatalf("h=%+v want poster %q err=%v", h, wantPoster, err)
+	}
+}
+
 func TestLibraryStreamForRouting(t *testing.T) {
 	lib := New(nil)
 	mp4, err := lib.StreamFor("/x/a.mp4")
