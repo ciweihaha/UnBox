@@ -55,15 +55,28 @@ func InsecureHost(host string) bool {
 }
 
 // normalizeHost 统一成小写、去掉端口，便于按主机名匹配。
+//
+// 端口只在「恰好一个冒号」时剥离：裸 IPv6 地址含多个冒号
+// （URL.Hostname() 的形态，如 2001:db8::1），按最后一个冒号切会把
+// 地址截断成 2001:db8:，与带括号的配置 [2001:db8::1]:8443 永远对不上，
+// 证书豁免对 IPv6 源站静默失效。
 func normalizeHost(host string) string {
 	h := strings.TrimSpace(strings.ToLower(host))
 	if h == "" {
 		return ""
 	}
-	if i := strings.LastIndex(h, ":"); i > 0 && !strings.Contains(h[i+1:], "]") {
-		h = h[:i]
+	if strings.HasPrefix(h, "[") {
+		if name, _, err := net.SplitHostPort(h); err == nil {
+			return strings.ToLower(strings.TrimSpace(name))
+		}
+		return strings.Trim(h, "[]")
 	}
-	return strings.Trim(h, "[]")
+	if strings.Count(h, ":") == 1 {
+		if i := strings.LastIndex(h, ":"); i > 0 {
+			h = h[:i]
+		}
+	}
+	return h
 }
 
 // NewClient 返回带显式传输层配置的客户端。

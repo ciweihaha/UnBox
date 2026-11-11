@@ -237,6 +237,11 @@ func TestNormalizeHost(t *testing.T) {
 		"example.com:8443": "example.com",
 		"  example.com  ":  "example.com",
 		"":                 "",
+		// 裸 IPv6 含多个冒号，不能按最后一个冒号切端口（会截断地址）。
+		"2001:DB8::1":        "2001:db8::1",
+		"[2001:db8::1]:8443": "2001:db8::1",
+		"[2001:db8::1]":      "2001:db8::1",
+		"127.0.0.1:8080":     "127.0.0.1",
 	}
 	for in, want := range cases {
 		if got := normalizeHost(in); got != want {
@@ -250,6 +255,23 @@ func TestNormalizeHost(t *testing.T) {
 	}
 	if InsecureHost("other.com") {
 		t.Fatal("未授权主机不应匹配")
+	}
+}
+
+// TestInsecureHostIPv6 是回归测试（第 29 轮）：裸 IPv6 主机（URL.Hostname()
+// 的形态）的证书豁免必须能匹配，否则豁免对 IPv6 源站静默失效。
+func TestInsecureHostIPv6(t *testing.T) {
+	SetInsecureHosts([]string{"2001:db8::1"})
+	defer SetInsecureHosts(nil)
+	if !InsecureHost("2001:db8::1") {
+		t.Fatal("裸 IPv6 主机应能匹配豁免")
+	}
+	SetInsecureHosts([]string{"[2001:db8::1]:8443"})
+	if !InsecureHost("2001:db8::1") {
+		t.Fatal("带端口的 IPv6 主机应能匹配豁免")
+	}
+	if InsecureHost("2001:db8::2") {
+		t.Fatal("不同的 IPv6 主机不应匹配")
 	}
 }
 
