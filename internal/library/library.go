@@ -128,7 +128,12 @@ func (l *Library) Scan() (ScanResult, error) {
 		for i := range items {
 			items[i].Dir = dir.Path
 			if items[i].Poster != "" {
-				items[i].Poster = l.server.register(items[i].Poster)
+				// 注册失败只丢海报、不丢条目：死 URL 比无海报更糟。
+				if url, err := l.server.register(items[i].Poster); err == nil {
+					items[i].Poster = url
+				} else {
+					items[i].Poster = ""
+				}
 			}
 		}
 		oldPaths := make(map[string]struct{}, len(previous))
@@ -178,7 +183,11 @@ func (l *Library) StreamFor(path string) (player.Stream, error) {
 	}
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(absolute), "."))
 	if ext == "mp4" || ext == "m4v" || ext == "webm" {
-		return player.Stream{URL: l.server.register(absolute), Kind: player.StreamMP4}, nil
+		url, err := l.server.register(absolute)
+		if err != nil {
+			return player.Stream{}, err
+		}
+		return player.Stream{URL: url, Kind: player.StreamMP4}, nil
 	}
 	if !videoExts[ext] {
 		return player.Stream{}, fmt.Errorf("不支持的媒体格式: %s", filepath.Ext(absolute))

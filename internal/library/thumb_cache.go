@@ -36,7 +36,15 @@ func (l *Library) EnsureThumb(path string, mtime int64) (videoURL, posterURL str
 		return "", "", false, err
 	}
 	_, statErr := os.Stat(cachePath)
-	return l.server.register(abs), l.server.register(cachePath), statErr == nil, nil
+	videoURL, err = l.server.register(abs)
+	if err != nil {
+		return "", "", false, err
+	}
+	posterURL, err = l.server.register(cachePath)
+	if err != nil {
+		return "", "", false, err
+	}
+	return videoURL, posterURL, statErr == nil, nil
 }
 
 // SaveThumb 原子保存前端抓取的 JPEG，并返回缓存 URL。
@@ -74,7 +82,11 @@ func (l *Library) SaveThumb(path string, mtime int64, jpeg []byte) (posterURL st
 	if err != nil {
 		return "", err
 	}
-	return l.server.register(cachePath), nil
+	posterURL, err = l.server.register(cachePath)
+	if err != nil {
+		return "", err
+	}
+	return posterURL, nil
 }
 
 // GenerateThumbMpv 使用注入的生成器抓取视频首帧；生成器为空时返回 ErrNoMpv。
@@ -99,5 +111,9 @@ func (l *Library) GenerateThumbMpv(path string, mtime int64, generator ...thumb.
 	if err := gen.Generate(path, cachePath); err != nil {
 		return "", err
 	}
-	return l.server.register(cachePath), nil
+	posterURL, err = l.server.register(cachePath)
+	if err != nil {
+		return "", err
+	}
+	return posterURL, nil
 }

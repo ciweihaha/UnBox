@@ -32,8 +32,10 @@ func newServer() *server {
 	return &server{ids: make(map[string]string), rev: make(map[string]string), token: hex.EncodeToString(b)}
 }
 
-// register 登记一个文件路径并返回可访问的 URL。
-func (s *server) register(path string) string {
+// register 登记一个文件路径并返回可访问的 URL。监听起不来或服务已
+// 关闭时返回错误——以前是返回无端口的死 URL（http://127.0.0.1/v/...），
+// 调用方无从得知、海报与播放都静默失败。
+func (s *server) register(path string) (string, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		absPath = path
@@ -41,35 +43,36 @@ func (s *server) register(path string) string {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.ln == nil {
+		if s.closed {
+			return "", fmt.Errorf("本地媒体服务已关闭")
+		}
+		ln, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			return "", fmt.Errorf("启动本地媒体服务失败: %w", err)
+		}
+		s.ln = ln
+		go func() {
+			if err := http.Serve(ln, s.handler()); err != nil && !errors.Is(err, http.ErrServerClosed) && !strings.Contains(err.Error(), "use of closed network connection") {
+				// 正常关闭是 close() 直接关 listener，走 "use of closed network
+				// connection" 分支（与 close() 里的判定一致），不记错误。
+				log.Printf("本地媒体服务退出异常: %v", err)
+			}
+		}()
+	}
 	if id, ok := s.rev[absPath]; ok {
-		return s.urlLocked(id)
+		return s.urlLocked(id), nil
 	}
 	s.seq++
 	id := fmt.Sprintf("%d", s.seq)
 	s.ids[id] = absPath
 	s.rev[absPath] = id
-	if s.ln == nil && !s.closed {
-		ln, err := net.Listen("tcp4", "127.0.0.1:0")
-		if err == nil {
-			s.ln = ln
-			go func() {
-				if err := http.Serve(ln, s.handler()); err != nil && !errors.Is(err, http.ErrServerClosed) && !strings.Contains(err.Error(), "use of closed network connection") {
-					// 正常关闭是 close() 直接关 listener，走 "use of closed network
-					// connection" 分支（与 close() 里的判定一致），不记错误。
-					log.Printf("本地媒体服务退出异常: %v", err)
-				}
-			}()
-		}
-	}
-	return s.urlLocked(id)
+	return s.urlLocked(id), nil
 }
 
 func (s *server) urlLocked(id string) string {
-	host := "127.0.0.1"
-	if s.ln != nil {
-		host = s.ln.Addr().String()
-	}
-	return fmt.Sprintf("http://%s/v/%s?t=%s", host, id, s.token)
+	// 只在持锁且监听已就绪时调用，ln 一定非 nil。
+	return fmt.Sprintf("http://%s/v/%s?t=%s", s.ln.Addr().String(), id, s.token)
 }
 
 func (s *server) handler() http.Handler {
