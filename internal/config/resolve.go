@@ -30,6 +30,11 @@ func NewResolver() *Resolver {
 // resolveWorkerLimit 是展开时并发拉取的上限。
 const resolveWorkerLimit = 8
 
+// maxResolveNodes 是单次 Resolve 展开的节点总数上限：每个节点一个
+// goroutine，恶意/损坏的订阅（一个索引含数万条目）会无界扇出 goroutine
+// 直到内存撑爆。真实聚合索引只有几十个节点，1024 已非常宽松。
+const maxResolveNodes = 1024
+
 // resolveState 是单次 Resolve 的全部共享状态，字段由 mu 守护。
 //
 // seen 记录每个 ref 已知的最小到达深度（不是简单的"是否访问过"布尔值）。
@@ -48,6 +53,8 @@ type resolveState struct {
 	inflight       map[string]chan struct{}
 	collectedDepth map[string]int
 	depthRejected  map[string]bool
+	nodes          int  // 已认领的展开节点数（含根节点），超 maxResolveNodes 即拒绝
+	limitExceeded  bool // 上限错误是否已记录（只记一次）
 	out            []*Config
 	errs           []error
 }
@@ -71,6 +78,23 @@ func (st *resolveState) claim(ref string, depth int) bool {
 		return false
 	}
 	st.seen[ref] = depth
+	return true
+}
+
+// tryClaimNode 为一个新展开节点认领计数：超 maxResolveNodes 时返回 false
+// （调用方跳过该节点），上限错误只记录一次。goroutine 数与节点数一一对应，
+// 认领即封顶了扇出规模。
+func (st *resolveState) tryClaimNode() bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.nodes >= maxResolveNodes {
+		if !st.limitExceeded {
+			st.limitExceeded = true
+			st.errs = append(st.errs, fmt.Errorf("展开节点数超过上限 %d，剩余节点已跳过", maxResolveNodes))
+		}
+		return false
+	}
+	st.nodes++
 	return true
 }
 
@@ -162,6 +186,7 @@ func (r *Resolver) Resolve(ctx context.Context, ref string) ([]*Config, error) {
 	sem := make(chan struct{}, resolveWorkerLimit)
 	var wg sync.WaitGroup
 
+	st.tryClaimNode() // 根节点计入上限（首个认领不可能失败）
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -273,6 +298,9 @@ func (r *Resolver) walk(ctx context.Context, ref string, depth int, sourceName s
 
 // spawn 为一个子节点起一个 goroutine，受 sem 与 wg 约束。
 func (r *Resolver) spawn(ctx context.Context, ref string, depth int, sourceName string, st *resolveState, sem chan struct{}, wg *sync.WaitGroup) {
+	if !st.tryClaimNode() {
+		return // 超节点上限：不建 goroutine、不拉取该节点
+	}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
