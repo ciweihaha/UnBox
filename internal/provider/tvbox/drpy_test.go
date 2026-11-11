@@ -3,8 +3,10 @@ package tvbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/unbox/unbox/internal/config"
@@ -104,5 +106,44 @@ func TestDrpyDetailAndResolve(t *testing.T) {
 	}
 	if st.Headers["Referer"] == "" {
 		t.Fatalf("Resolve 应带 Referer: %+v", st.Headers)
+	}
+}
+
+// TestDrpyDetailCacheIsBounded 是回归测试（第 40 轮）：第 31/39 轮给 CMS
+// Provider、Spider、JarProvider 的 Detail 缓存封顶时漏了 Drpy，
+// 同样 300 部 × 50 集会无界膨胀到 15000 条。
+func TestDrpyDetailCacheIsBounded(t *testing.T) {
+	const vods, epsPerVod = 300, 50
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("ids")
+		var eps strings.Builder
+		for i := 1; i <= epsPerVod; i++ {
+			if i > 1 {
+				eps.WriteString("#")
+			}
+			fmt.Fprintf(&eps, "第%02d集$http://x/%s/ep%d", i, id, i)
+		}
+		fmt.Fprintf(w, `{"list":[{"vod_id":%q,"vod_name":"剧","vod_play_from":"线路","vod_play_url":%q}]}`, id, eps.String())
+	}))
+	defer srv.Close()
+	p := NewDrpy(config.Site{Key: "s1", Name: "站点", Type: config.SiteTypeSpider, API: srv.URL})
+	ctx := context.Background()
+	for i := 0; i < vods; i++ {
+		if _, err := p.Detail(ctx, fmt.Sprintf("vod%d", i)); err != nil {
+			t.Fatalf("Detail vod%d 失败: %v", i, err)
+		}
+	}
+	p.mu.Lock()
+	cached := len(p.cache)
+	p.mu.Unlock()
+	if cached > maxCachedEpisodes {
+		t.Fatalf("缓存剧集 %d 条，超过上限 %d", cached, maxCachedEpisodes)
+	}
+	st, err := p.Resolve(ctx, "vod299/0/49")
+	if err != nil {
+		t.Fatalf("Resolve 末尾剧集失败: %v", err)
+	}
+	if st.URL != "http://x/vod299/ep50" {
+		t.Fatalf("Resolve 末尾剧集 URL = %q", st.URL)
 	}
 }

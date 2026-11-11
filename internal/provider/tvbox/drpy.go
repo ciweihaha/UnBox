@@ -181,9 +181,7 @@ func (p *Drpy) Detail(ctx context.Context, id string) (provider.Media, error) {
 	sources := splitSources(v.VodPlayFrom)
 	eps := parseEpisodes(id, v.VodPlayURL, sources)
 	p.mu.Lock()
-	for _, e := range eps {
-		p.cache[e.ID] = e
-	}
+	p.cache = cacheEpisodes(p.cache, eps)
 	p.mu.Unlock()
 	return provider.Media{
 		ID:          id,
