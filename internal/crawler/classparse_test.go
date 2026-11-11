@@ -23,9 +23,20 @@ func TestParseClassesRequiresSegments(t *testing.T) {
 	if _, err := parseClasses(`<li>x</li>`, `li;Text`); err == nil {
 		t.Fatal("expected error for missing class_parse segment")
 	}
-	// 5 段太多。
-	if _, err := parseClasses(`<li>x</li>`, `li;Text;href;/(x)/;extra`); err == nil {
-		t.Fatal("expected error for extra class_parse segment")
+	// 第 4 段是 id 正则：分号后的内容归入正则，非法正则是配置错误。
+	if _, err := parseClasses(`<li>x</li>`, `li;Text;href;/(x)/;[invalid`); err == nil {
+		t.Fatal("expected error for invalid class_parse id regexp")
+	}
+}
+
+// TestParseClassesKeepsSemicolonInIDRegexp 是回归测试（第 33 轮）：
+// 第 4 段 id 正则里的分号（如 id=12;v=7 的提取）不能把规则多切出
+// 一段而报错，4 段后的分号都属于正则本身。
+func TestParseClassesKeepsSemicolonInIDRegexp(t *testing.T) {
+	html := `<ul><li><a href="/c?id=12;v=7">电影</a></li><li><a href="/c?id=34;v=8">电视剧</a></li></ul>`
+	cls, err := parseClasses(html, `li&&a&&Text;li&&a&&Text;li&&a&&href;id=(\d+);v=(\d+)`)
+	if err != nil || len(cls) != 2 || cls[0].TypeID != "12" || cls[0].TypeName != "电影" || cls[1].TypeID != "34" {
+		t.Fatalf("cls=%+v err=%v", cls, err)
 	}
 }
 

@@ -13,7 +13,9 @@ import (
 // 最后一段（id 正则）可省略：很多真实脚本的 id 规则已直接提取出值
 // （如 B站影视 ".fixed-nav&&.flex:lt(4);li&&Text;li&&data-id"）。
 func parseClasses(html, classParse string) ([]Class, error) {
-	parts := strings.Split(classParse, ";")
+	// 最多切 4 段：第 4 段是 id 提取正则，正则里的分号（如 id=12;v=7）
+	// 属于正则本身，不能再切——否则 5 段直接报错。
+	parts := strings.SplitN(classParse, ";", 4)
 	if len(parts) != 3 && len(parts) != 4 {
 		return nil, fmt.Errorf("class_parse 需要三段或四段规则")
 	}
