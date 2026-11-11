@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/unbox/unbox/internal/config"
@@ -19,6 +20,44 @@ func TestNewJarAcceptsXBPQ(t *testing.T) {
 	p, err := NewJar(config.Site{Key: "x", API: "csp_XBPQ", Ext: "https://x/r.json"})
 	if err != nil || p == nil {
 		t.Fatalf("NewJar = %v, %v", p, err)
+	}
+}
+
+// TestJarLoadFailureRetries 是回归测试（第 38 轮）：规则加载失败不能
+// 被缓存——第 34 轮修了 Spider 的同款问题，JarProvider 漏了；一次
+// 瞬时 500 会让该站点在本会话内永久不可用，下次调用应重新加载。
+func TestJarLoadFailureRetries(t *testing.T) {
+	var calls atomic.Int32
+	ruleJSON := `{
+		"主页url":"http://example.com/",
+		"分类":"电影$1",
+		"分类url":"http://example.com/c/{cateId}/{catePg}",
+		"数组":"class=\"item\"&&</li>",
+		"标题":"title=\"&&\"",
+		"链接":"href=\"&&\""
+	}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			http.Error(w, "瞬时故障", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(ruleJSON))
+	}))
+	defer srv.Close()
+
+	p, err := NewJar(config.Site{Key: "x", API: "csp_XBPQ", Ext: srv.URL + "/rule.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Home(context.Background()); err == nil {
+		t.Fatal("第一次加载 500 应报错")
+	}
+	secs, err := p.Home(context.Background())
+	if err != nil || len(secs) != 1 || secs[0].ID != "1" {
+		t.Fatalf("重试后 Home 应成功: %+v err=%v", secs, err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("应恰好加载两次，实际 %d 次", calls.Load())
 	}
 }
 

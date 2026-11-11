@@ -43,7 +43,11 @@ func (p *JarProvider) ensureLoaded(ctx context.Context) error {
 		return p.loadErr
 	}
 	p.engine, p.loadErr = rule.NewEngine(ctx, p.site.API, p.site.ExtString())
-	p.loaded = true
+	// 失败不置 loaded：一次瞬时断网/500 不能让该站点在本会话内永久
+	// 不可用，下次调用重新加载（与 Spider.ensureLoaded 同款修复）。
+	if p.loadErr == nil {
+		p.loaded = true
+	}
 	return p.loadErr
 }
 
