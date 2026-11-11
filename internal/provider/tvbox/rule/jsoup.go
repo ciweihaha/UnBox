@@ -25,6 +25,60 @@ import (
 
 var jsoupIndexSuffixRe = regexp.MustCompile(`^(.*),(-?\d+)$`)
 
+// splitJsoupChain 按 && 切分链式规则，但括号内与引号内的 && 不是分隔符：
+// :matches(a&&b) 里的正则、a[href='/p?a=1&&b=2'] 里的属性值都含 &&，
+// 裸 strings.Split 会把一步切散、拼出非法选择器。与 crawler 的
+// splitTopLevel、xpath 的 xpathSplitSteps 是同一类修复。
+func splitJsoupChain(rule string) []string {
+	var out []string
+	var cur strings.Builder
+	quote := byte(0)
+	depth := 0
+	for i := 0; i < len(rule); {
+		c := rule[i]
+		if quote != 0 {
+			cur.WriteByte(c)
+			if c == '\\' && i+1 < len(rule) {
+				cur.WriteByte(rule[i+1])
+				i += 2
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+			i++
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			quote = c
+			cur.WriteByte(c)
+			i++
+		case '(':
+			depth++
+			cur.WriteByte(c)
+			i++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+			cur.WriteByte(c)
+			i++
+		default:
+			if depth == 0 && strings.HasPrefix(rule[i:], "&&") {
+				out = append(out, cur.String())
+				cur.Reset()
+				i += 2
+				continue
+			}
+			cur.WriteByte(c)
+			i++
+		}
+	}
+	out = append(out, cur.String())
+	return out
+}
+
 // noJSoupIndex 表示选择器没有 ",N" 索引，取全部命中。
 // 用独立哨兵值避免与真正的索引 -1（最后一项）混淆。
 const noJSoupIndex = int(-1 << 30)
@@ -67,7 +121,7 @@ func jsoupSelectOn(base *goquery.Selection, rule string) *goquery.Selection {
 		return nil
 	}
 	nodes := base
-	for _, raw := range strings.Split(rule, "&&") {
+	for _, raw := range splitJsoupChain(rule) {
 		step := strings.TrimSpace(raw)
 		if step == "" {
 			continue
@@ -100,7 +154,7 @@ func jsoupExtractChain(base *goquery.Selection, rule string) []string {
 	if strings.TrimSpace(rule) == "" {
 		return nil
 	}
-	steps := strings.Split(rule, "&&")
+	steps := splitJsoupChain(rule)
 	nodes := base
 	var values []string
 	for i, raw := range steps {
