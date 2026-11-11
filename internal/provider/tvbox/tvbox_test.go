@@ -2,8 +2,11 @@ package tvbox
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/unbox/unbox/internal/config"
@@ -104,6 +107,53 @@ func TestResolveUnknownEpisode(t *testing.T) {
 	p := newTestProvider(t)
 	if _, err := p.Resolve(context.Background(), "1/9/9"); err == nil {
 		t.Fatalf("未知剧集应报错")
+	}
+}
+
+// TestProviderDetailCacheIsBounded 是回归测试（第 31 轮）：Detail 剧集
+// 缓存不得无界增长；超限清空后，末尾剧集仍命中缓存、最早的剧集按需重拉。
+func TestProviderDetailCacheIsBounded(t *testing.T) {
+	const vods, epsPerVod = 300, 50
+	var detailCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("ids")
+		detailCalls.Add(1)
+		var eps strings.Builder
+		for i := 1; i <= epsPerVod; i++ {
+			if i > 1 {
+				eps.WriteString("#")
+			}
+			fmt.Fprintf(&eps, "第%02d集$http://x/%s/ep%d", i, id, i)
+		}
+		fmt.Fprintf(w, `{"code":1,"list":[{"vod_id":%q,"vod_name":"剧","vod_play_from":"线路","vod_play_url":%q}]}`, id, eps.String())
+	}))
+	defer srv.Close()
+	p := New(config.Site{Key: "test", Name: "测试站", Type: config.SiteTypeCMS, API: srv.URL})
+	ctx := context.Background()
+	for i := 0; i < vods; i++ {
+		if _, err := p.Detail(ctx, fmt.Sprintf("vod%d", i)); err != nil {
+			t.Fatalf("Detail vod%d 失败: %v", i, err)
+		}
+	}
+	p.mu.Lock()
+	cached := len(p.cache)
+	p.mu.Unlock()
+	if cached > maxCachedEpisodes {
+		t.Fatalf("缓存剧集 %d 条，超过上限 %d", cached, maxCachedEpisodes)
+	}
+	callsBefore := detailCalls.Load()
+	if _, err := p.Resolve(ctx, "vod299/0/49"); err != nil {
+		t.Fatalf("Resolve 末尾剧集失败: %v", err)
+	}
+	if detailCalls.Load() != callsBefore {
+		t.Fatalf("末尾剧集应命中缓存，实际又拉了 %d 次详情", detailCalls.Load()-callsBefore)
+	}
+	st, err := p.Resolve(ctx, "vod0/0/0")
+	if err != nil {
+		t.Fatalf("Resolve 首部剧集失败: %v", err)
+	}
+	if st.URL != "http://x/vod0/ep1" {
+		t.Fatalf("Resolve 首部剧集 URL = %q", st.URL)
 	}
 }
 

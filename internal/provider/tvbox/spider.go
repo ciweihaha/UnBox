@@ -269,9 +269,7 @@ func (p *Spider) Detail(ctx context.Context, id string) (provider.Media, error) 
 	}
 	sources := splitSources(detail.VodPlayFrom)
 	episodes := parseEpisodes(id, detail.VodPlayURL, sources)
-	for _, episode := range episodes {
-		p.cache[episode.ID] = episode
-	}
+	p.cache = cacheEpisodes(p.cache, episodes)
 	return provider.Media{
 		ID: id, Title: detail.VodName, Logo: detail.VodPic, Group: detail.TypeName,
 		Description: detail.VodContent, Year: detail.VodYear, Area: detail.VodArea,

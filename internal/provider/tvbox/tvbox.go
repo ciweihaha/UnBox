@@ -15,6 +15,24 @@ import (
 	"github.com/unbox/unbox/internal/provider"
 )
 
+// maxCachedEpisodes 是 Detail 剧集缓存的上限：每次 Detail 都把全集
+// 剧集记入缓存、永不清，长期浏览会无界膨胀。超限时整体清空后重记
+// （剧集可按需从详情重新拉取，清空只是丢缓存、不丢数据）。
+const maxCachedEpisodes = 10000
+
+// cacheEpisodes 把剧集记入缓存；与上限之和超限时整体清空后重记
+// （剧集可按需从详情重新拉取，清空只是丢缓存、不丢数据）。调用方
+// 在持锁期间调用，返回的新 map 要写回调用方的 cache 字段。
+func cacheEpisodes(cache map[string]provider.Episode, eps []provider.Episode) map[string]provider.Episode {
+	if len(cache)+len(eps) > maxCachedEpisodes {
+		cache = make(map[string]provider.Episode, len(eps))
+	}
+	for _, e := range eps {
+		cache[e.ID] = e
+	}
+	return cache
+}
+
 // Provider 是单个 CMS 站点的 Provider 实现。
 type Provider struct {
 	site config.Site
@@ -119,9 +137,7 @@ func (p *Provider) Detail(ctx context.Context, id string) (provider.Media, error
 	sources := splitSources(v.VodPlayFrom)
 	eps := parseEpisodes(id, v.VodPlayURL, sources)
 	p.mu.Lock()
-	for _, e := range eps {
-		p.cache[e.ID] = e
-	}
+	p.cache = cacheEpisodes(p.cache, eps)
 	p.mu.Unlock()
 	return provider.Media{
 		ID:          id,
