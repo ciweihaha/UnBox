@@ -103,8 +103,14 @@ func normalizeTLSHost(raw string) string {
 		if i := strings.Index(host, "]"); i >= 0 {
 			host = host[:i+1]
 		}
-	} else if i := strings.LastIndex(host, ":"); i > 0 {
-		host = host[:i]
+	} else if strings.Count(host, ":") == 1 {
+		// 端口只在恰好一个冒号时剥离：裸 IPv6 含多个冒号，按最后一个
+		// 冒号切会把地址截断（2001:db8::1 → 2001:db8:），与运行时
+		// 的完整主机永远对不上，豁免静默失效（与 httpx.normalizeHost
+		// 第 29 轮的同款问题）。
+		if i := strings.LastIndex(host, ":"); i > 0 {
+			host = host[:i]
+		}
 	}
 	return strings.Trim(host, "[]")
 }
