@@ -46,3 +46,15 @@ func TestParseClassesSupportsJQueryLimit(t *testing.T) {
 		t.Fatalf("cls=%+v err=%v", cls, err)
 	}
 }
+
+// TestParseClassesKeepsDoubleAmpersandInQuotedAttr 是回归测试（第 28 轮）：
+// 选择器引号里的 &&（如 href 查询串）不能把选择链切散，否则
+// selectClassEntries 拼出非法选择器、条目取不到名字与 id。
+// 与 evalRule、JSoup 链按引号切分是同一类问题。
+func TestParseClassesKeepsDoubleAmpersandInQuotedAttr(t *testing.T) {
+	html := `<div class="nav"><a href="/c?a=1&&b=2">电影</a><a href="/c?a=3&&b=4">电视剧</a></div>`
+	cls, err := parseClasses(html, `.nav&&a[href*='a=1&&b=2'];a&&Text;a&&href`)
+	if err != nil || len(cls) != 1 || cls[0].TypeID != "/c?a=1&&b=2" || cls[0].TypeName != "电影" {
+		t.Fatalf("cls=%+v err=%v", cls, err)
+	}
+}

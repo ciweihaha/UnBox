@@ -67,7 +67,7 @@ func parseClasses(html, classParse string) ([]Class, error) {
 }
 
 func selectClassEntries(doc *goquery.Document, rule string) *goquery.Selection {
-	parts := strings.Split(rule, "&&")
+	parts := splitTopLevel(rule, "&&")
 	sel := doc.Selection
 	for _, raw := range parts {
 		seg := strings.TrimSpace(raw)
@@ -83,7 +83,7 @@ func ruleForEntry(rule string, item *goquery.Selection) string {
 	if len(item.Nodes) == 0 {
 		return rule
 	}
-	parts := strings.Split(rule, "&&")
+	parts := splitTopLevel(rule, "&&")
 	for i, part := range parts {
 		if strings.EqualFold(strings.TrimSpace(part), item.Nodes[0].Data) {
 			return strings.Join(parts[i+1:], "&&")
@@ -94,7 +94,7 @@ func ruleForEntry(rule string, item *goquery.Selection) string {
 
 // drpy commonly omits parentheses for terminal Text/Html operators.
 func normalizeClassRule(rule string) string {
-	parts := strings.Split(rule, "&&")
+	parts := splitTopLevel(rule, "&&")
 	for i, part := range parts {
 		switch strings.TrimSpace(part) {
 		case "Text":
