@@ -27,6 +27,19 @@ const (
 	maxIntervalTotal = 10 * time.Second
 )
 
+// clampTimerDelay 把脚本传来的毫秒数钳到 [0, maxTimerDelay]：必须先钳
+// 再乘 time.Millisecond——超大值直接乘会溢出变负，负值再钳成 0
+// （setInterval 旧写法），本应按上限等的回调变成无等待空转。
+func clampTimerDelay(ms int64) int64 {
+	if ms < 0 {
+		return 0
+	}
+	if ms > maxTimerDelay.Milliseconds() {
+		return maxTimerDelay.Milliseconds()
+	}
+	return ms
+}
+
 func (e *Engine) installHelpers() {
 	_ = e.vm.Set("log", func(call goja.FunctionCall) goja.Value {
 		args := make([]any, len(call.Arguments))
@@ -227,13 +240,7 @@ func (e *Engine) installHelpers() {
 		if !ok {
 			return e.vm.ToValue(0)
 		}
-		wait := time.Duration(call.Argument(1).ToInteger()) * time.Millisecond
-		if wait < 0 {
-			wait = 0
-		}
-		if wait > maxTimerDelay {
-			wait = maxTimerDelay
-		}
+		wait := time.Duration(clampTimerDelay(call.Argument(1).ToInteger())) * time.Millisecond
 		e.nextIntervalID++
 		id := e.nextIntervalID
 		if e.intervals == nil {
