@@ -94,6 +94,16 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("打开数据库失败: %w", err)
 	}
+	// SQLite 是单写者：连接池默认多连接并行写只会互相报 SQLITE_BUSY
+	//（16 goroutine 并行写实测 1561/1600 次失败，见 TestParallelWrites）。
+	// 只留一个连接，写操作天然串行；再配 5 秒 busy_timeout，兜底第二
+	// 个进程（如重复启动的实例）短暂持锁的情形。
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	if _, err := db.Exec(`PRAGMA busy_timeout = 5000`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("设置数据库忙等待超时失败: %w", err)
+	}
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
 		db.Close()
