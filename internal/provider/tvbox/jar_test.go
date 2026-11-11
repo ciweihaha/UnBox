@@ -2,8 +2,10 @@ package tvbox
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -58,6 +60,59 @@ func TestJarLoadFailureRetries(t *testing.T) {
 	}
 	if calls.Load() != 2 {
 		t.Fatalf("应恰好加载两次，实际 %d 次", calls.Load())
+	}
+}
+
+// TestJarDetailCacheIsBounded 是回归测试（第 39 轮）：第 31 轮给 CMS
+// Provider 与 Spider 的 Detail 缓存封顶时漏了 JarProvider，
+// 同样 300 部 × 50 集会无界膨胀到 15000 条。
+func TestJarDetailCacheIsBounded(t *testing.T) {
+	const vods, epsPerVod = 300, 50
+	mux := http.NewServeMux()
+	mux.HandleFunc("/rule.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"主页url":"http://` + r.Host + `/",
+			"分类":"电影$1",
+			"分类url":"http://` + r.Host + `/c/{cateId}/{catePg}",
+			"数组":"class=\"item\"&&</li>",
+			"标题":"title=\"&&\"",
+			"链接":"href=\"&&\"",
+			"播放数组":"class=\"play\">&&</div>",
+			"播放列表":"<a&&</a>",
+			"播放标题":"<span>&&</span>",
+			"播放链接":"href=\"&&\""
+		}`))
+	})
+	mux.HandleFunc("/v/", func(w http.ResponseWriter, r *http.Request) {
+		var b strings.Builder
+		b.WriteString(`<title>剧</title><div class="play">`)
+		for i := 1; i <= epsPerVod; i++ {
+			fmt.Fprintf(&b, `<a href="/p/%s/%d"><span>第%02d集</span></a>`, strings.TrimPrefix(r.URL.Path, "/v/"), i, i)
+		}
+		b.WriteString(`</div>`)
+		_, _ = w.Write([]byte(b.String()))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p, err := NewJar(config.Site{Key: "x", API: "csp_XBPQ", Ext: srv.URL + "/rule.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for i := 0; i < vods; i++ {
+		if _, err := p.Detail(ctx, fmt.Sprintf("%s/v/%d", srv.URL, i)); err != nil {
+			t.Fatalf("Detail /v/%d 失败: %v", i, err)
+		}
+	}
+	p.mu.Lock()
+	cached := len(p.cache)
+	p.mu.Unlock()
+	if cached > maxCachedEpisodes {
+		t.Fatalf("缓存剧集 %d 条，超过上限 %d", cached, maxCachedEpisodes)
+	}
+	if _, err := p.Resolve(ctx, srv.URL+"/v/299/0/49"); err != nil {
+		t.Fatalf("Resolve 末尾剧集失败: %v", err)
 	}
 }
 

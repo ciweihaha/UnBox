@@ -87,9 +87,7 @@ func (p *JarProvider) Detail(ctx context.Context, id string) (provider.Media, er
 	sources := splitSources(v.PlayFrom)
 	eps := parseEpisodes(id, v.PlayURL, sources)
 	p.mu.Lock()
-	for _, ep := range eps {
-		p.cache[ep.ID] = ep
-	}
+	p.cache = cacheEpisodes(p.cache, eps)
 	p.mu.Unlock()
 	return provider.Media{
 		ID: id, Title: v.Name, Logo: v.Pic, Group: v.TypeName,
