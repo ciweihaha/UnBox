@@ -24,7 +24,7 @@ func evalRule(doc *goquery.Document, rule string) []string {
 	selection := doc.Selection
 	values := []string(nil)
 	stringMode := false
-	for _, raw := range strings.Split(rule, "&&") {
+	for _, raw := range splitTopLevel(rule, "&&") {
 		seg := strings.TrimSpace(raw)
 		if seg == "" {
 			continue
@@ -184,9 +184,65 @@ func argsAt(args []string, i int) string {
 func parseCallArgs(s string) []string {
 	s = strings.TrimSuffix(strings.TrimPrefix(s, strings.SplitN(s, "(", 2)[0]+"("), ")")
 	var out []string
-	for _, a := range strings.Split(s, ",") {
+	for _, a := range splitTopLevel(s, ",") {
 		out = append(out, strings.Trim(strings.TrimSpace(a), `"'`))
 	}
+	return out
+}
+
+// splitTopLevel 按顶层分隔符切分：引号内与括号内的分隔符不是切分点。
+//
+// 规则链按 && 切分时，match(a&&b)、replace('x&&y','z') 这类参数里的 &&
+// 不能把链切散；replace('a,b','c') 参数里的逗号也不能切分参数。
+// 与 xpath 按引号切分步是同一类问题（见 xpathSplitSteps）。
+// 引号支持单双引号与反斜杠转义；括号支持嵌套。
+func splitTopLevel(s, delim string) []string {
+	var out []string
+	var cur strings.Builder
+	quote := byte(0)
+	depth := 0
+	for i := 0; i < len(s); {
+		c := s[i]
+		if quote != 0 {
+			cur.WriteByte(c)
+			if c == '\\' && i+1 < len(s) {
+				cur.WriteByte(s[i+1])
+				i += 2
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+			i++
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			quote = c
+			cur.WriteByte(c)
+			i++
+		case '(':
+			depth++
+			cur.WriteByte(c)
+			i++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+			cur.WriteByte(c)
+			i++
+		default:
+			if depth == 0 && strings.HasPrefix(s[i:], delim) {
+				out = append(out, cur.String())
+				cur.Reset()
+				i += len(delim)
+				continue
+			}
+			cur.WriteByte(c)
+			i++
+		}
+	}
+	out = append(out, cur.String())
 	return out
 }
 
