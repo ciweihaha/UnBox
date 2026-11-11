@@ -17,6 +17,24 @@ import (
 
 const crawlerUA = "okhttp/3.12.11"
 
+// maxReqTimeout 是 req() 单次请求超时的上限：毫秒数乘 1e6 换算成
+// time.Duration 时，超过约 292 年就会溢出变负，http.Client.Timeout
+// ≤ 0 等于无超时，挂起的请求永不回来。
+const maxReqTimeout = 10 * time.Minute
+
+// reqTimeout 把脚本传来的毫秒数换算成 http 超时：≤0 保持 0（不改默认
+// 超时），超大值钳到上限。
+func reqTimeout(ms int64) time.Duration {
+	if ms <= 0 {
+		return 0
+	}
+	d := time.Duration(ms) * time.Millisecond
+	if d <= 0 || d > maxReqTimeout {
+		return maxReqTimeout
+	}
+	return d
+}
+
 type reqOpts struct {
 	Method  string            `json:"method"`
 	Headers map[string]string `json:"headers"`
@@ -79,7 +97,7 @@ func (e *Engine) installReq(hc *http.Client) {
 		client := hc
 		if o.Timeout > 0 {
 			copyClient := *hc
-			copyClient.Timeout = time.Duration(o.Timeout) * time.Millisecond
+			copyClient.Timeout = reqTimeout(o.Timeout)
 			client = &copyClient
 		}
 		resp, b, err := httpx.DoReadAll(client, req, 16<<20)

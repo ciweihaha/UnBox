@@ -11,6 +11,49 @@ import (
 	"github.com/dop251/goja"
 )
 
+// TestReqTimeoutClampsOverflow 是回归测试（第 35 轮）：脚本传超大 timeout
+// 时毫秒数乘 1e6 会溢出变负，http.Client.Timeout ≤ 0 等于无超时，
+// 挂起的请求永不回来；应钳到上限。
+func TestReqTimeoutClampsOverflow(t *testing.T) {
+	cases := map[int64]time.Duration{
+		0:                   0,
+		-5:                  0,
+		1000:                time.Second,
+		600_000:             maxReqTimeout,
+		1_000_000_000:       maxReqTimeout,
+		1 << 62:             maxReqTimeout,
+		9223372036854775807: maxReqTimeout,
+	}
+	for ms, want := range cases {
+		if got := reqTimeout(ms); got != want {
+			t.Errorf("reqTimeout(%d) = %v，期望 %v", ms, got, want)
+		}
+	}
+}
+
+// TestReqHugeTimeoutStillWorks 是边界测试（第 35 轮）：超大 timeout 的
+// 请求本身仍应正常完成（只是超时被钳到上限，不是报错）。
+func TestReqHugeTimeoutStillWorks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(50 * time.Millisecond)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	e := New()
+	e.installReq(http.DefaultClient)
+	if err := e.Load(fmt.Sprintf(`function go(){ return req(%q, {timeout: 1000000000000000}) }`, srv.URL)); err != nil {
+		t.Fatal(err)
+	}
+	v, err := e.Call("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := v.ToObject(e.vm).Get("content").String(); got != "ok" {
+		t.Fatalf("content = %q", got)
+	}
+}
+
 func TestReqInjectsAndCalls(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("wd") != "test" {
