@@ -57,6 +57,16 @@ func (e *Engine) resolveLazy(flag, id string) (string, error) {
 		if url := valueString(object.Get("url")); url != "" {
 			return url, nil
 		}
+		// 只有字符串能当播放地址：字面量与 String 对象（new String(url)）
+		// 的 ToObject 都是 String 类；普通对象没有 url 时 String()
+		// 只会给出 "[object Object]"，当地址返回只会让下游报误导性的
+		// 地址无效，应直接报错。
+		if object.ClassName() == "String" {
+			if result := value.String(); result != "" {
+				return result, nil
+			}
+		}
+		return "", fmt.Errorf("lazy 规则未返回播放地址")
 	}
 	if result := value.String(); result != "" {
 		return result, nil
