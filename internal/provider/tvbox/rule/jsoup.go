@@ -523,7 +523,14 @@ func splitFilter(sel string) (string, func(*goquery.Selection) bool) {
 		sel = strings.TrimSpace(sel[:i] + sel[end+1:])
 		if re, err := regexp.Compile(pat); err == nil {
 			filters = append(filters, func(s *goquery.Selection) bool {
-				return re.MatchString(outerHTML(s))
+				h := outerHTML(s)
+				if re.MatchString(h) {
+					return true
+				}
+				// 序列化会把 & 转义成 &amp;（文本与属性值同理），含 & 的
+				// 正则（如 a&&b、查询串 a=1&b=2）按字面写就永远命中不了；
+				// 反转义后再试一次。旧规则（已按序列化形态写）不受影响。
+				return re.MatchString(html.UnescapeString(h))
 			})
 		}
 	}
