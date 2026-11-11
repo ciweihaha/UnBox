@@ -1,6 +1,7 @@
 package library
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,6 +102,62 @@ func TestLibraryScanMultipleDirs(t *testing.T) {
 		if it.Dir != root1 {
 			t.Fatalf("只应剩 root1 的条目，got %+v", it)
 		}
+	}
+}
+
+// TestGroupItemsByDir 是回归测试（第 32 轮）：Scan 每目录过滤一次全表
+// 是 O(目录数×全表)，改成一次分组后按目录取。
+func TestGroupItemsByDir(t *testing.T) {
+	items := []store.LibraryItem{
+		{Dir: "/a", Path: "/a/1.mp4"},
+		{Dir: "/b", Path: "/b/2.mp4"},
+		{Dir: "/a", Path: "/a/3.mp4"},
+	}
+	byDir := groupItemsByDir(items)
+	if len(byDir["/a"]) != 2 || len(byDir["/b"]) != 1 {
+		t.Fatalf("分组错误: %+v", byDir)
+	}
+	if byDir["/a"][0].Path != "/a/1.mp4" || byDir["/a"][1].Path != "/a/3.mp4" {
+		t.Fatalf("同目录内顺序应保留: %+v", byDir["/a"])
+	}
+	if len(groupItemsByDir(nil)) != 0 {
+		t.Fatal("空快照应得空分组")
+	}
+}
+
+// TestLibraryScanManyDirs 规模测试（第 32 轮）：30 个目录 × 20 个文件，
+// 分组后的扫描在计数上与逐目录过滤完全一致。
+func TestLibraryScanManyDirs(t *testing.T) {
+	const dirs, filesPerDir = 30, 20
+	st := openLibraryTest(t)
+	defer st.Close()
+	lib := New(st)
+	var victim string
+	for d := 0; d < dirs; d++ {
+		root := t.TempDir()
+		for f := 0; f < filesPerDir; f++ {
+			p := filepath.Join(root, fmt.Sprintf("f%02d.mp4", f))
+			if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if d == 5 && f == 0 {
+				victim = p
+			}
+		}
+		if err := lib.AddDir(root); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := lib.Scan()
+	if err != nil || res.Dirs != dirs || res.Added != dirs*filesPerDir {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if err := os.Remove(victim); err != nil {
+		t.Fatal(err)
+	}
+	res, err = lib.Scan()
+	if err != nil || res.Removed != 1 || res.Added != 0 {
+		t.Fatalf("res after removal=%+v err=%v", res, err)
 	}
 }
 

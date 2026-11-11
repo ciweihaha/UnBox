@@ -110,14 +110,12 @@ func (l *Library) Scan() (ScanResult, error) {
 	if err != nil {
 		return result, err
 	}
+	// 快照按目录分一次组：以前每处理一个目录都全表过滤一次，目录一多
+	// 就是 O(目录数×全表)；分组后每目录直接取本目录的行。
+	byDir := groupItemsByDir(allPrevious)
 	for _, dir := range dirs {
 		result.Dirs++
-		previous := make([]store.LibraryItem, 0, len(allPrevious))
-		for _, item := range allPrevious {
-			if item.Dir == dir.Path {
-				previous = append(previous, item)
-			}
-		}
+		previous := byDir[dir.Path]
 		items, scanErr := scanDir(dir.Path)
 		if scanErr != nil {
 			result.Unavailable = append(result.Unavailable, dir.Path)
@@ -149,6 +147,15 @@ func (l *Library) Scan() (ScanResult, error) {
 		}
 	}
 	return result, nil
+}
+
+// groupItemsByDir 按目录分组库快照，供 Scan 每目录直接取本目录的行。
+func groupItemsByDir(items []store.LibraryItem) map[string][]store.LibraryItem {
+	byDir := make(map[string][]store.LibraryItem, len(items))
+	for _, item := range items {
+		byDir[item.Dir] = append(byDir[item.Dir], item)
+	}
+	return byDir
 }
 
 func (l *Library) List() ([]store.LibraryItem, error) {
