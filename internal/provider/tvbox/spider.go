@@ -107,7 +107,11 @@ func (p *Spider) ensureLoaded(ctx context.Context) error {
 		return p.loadErr
 	}
 	p.loadErr = p.engine.LoadFromURL(ctx, spiderScriptURL(p.site))
-	p.loaded = true
+	// 失败不置 loaded：一次瞬时断网/500 不能让该站点在本会话内永久
+	// 不可用，下次调用重新加载。
+	if p.loadErr == nil {
+		p.loaded = true
+	}
 	return p.loadErr
 }
 

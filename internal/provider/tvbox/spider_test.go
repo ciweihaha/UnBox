@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/unbox/unbox/internal/config"
@@ -25,6 +26,39 @@ func TestScriptExtSerializesObject(t *testing.T) {
 	}
 	if got := scriptExt(config.Site{}); got != "" {
 		t.Fatalf("无 ext 应为空，得 %q", got)
+	}
+}
+
+// TestSpiderLoadFailureRetries 是回归测试（第 34 轮）：加载脚本失败
+// 不能被缓存——一次瞬时断网/500 会让该站点在本会话内永久不可用，
+// 下次调用应重新加载。
+func TestSpiderLoadFailureRetries(t *testing.T) {
+	script := `
+function home(){ return [{vod_id:"1",vod_name:"甲",type_name:"电影"}] }
+`
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			http.Error(w, "瞬时故障", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(script))
+	}))
+	defer srv.Close()
+
+	p, err := NewSpider(config.Site{Key: "s1", Name: "示例站", Type: config.SiteTypeSpider, API: srv.URL + "/spider.js"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Home(context.Background()); err == nil {
+		t.Fatal("第一次加载 500 应报错")
+	}
+	sections, err := p.Home(context.Background())
+	if err != nil || len(sections) != 1 || sections[0].Title != "电影" {
+		t.Fatalf("重试后 Home 应成功: %+v err=%v", sections, err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("应恰好加载两次，实际 %d 次", calls.Load())
 	}
 }
 
