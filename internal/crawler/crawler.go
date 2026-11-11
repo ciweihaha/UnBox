@@ -175,6 +175,23 @@ func (e *Engine) runRuleScript(script string) (input, vod goja.Value, err error)
 	return obj.Get("input"), obj.Get("VOD"), nil
 }
 
+// maxScriptBytes 是单次下载的爬虫脚本/ESM 模块上限：真实脚本（含 drpy2
+// 引擎库）远小于此值；不限流时超大体会被全读进内存再解析，有 OOM 风险。
+const maxScriptBytes = 4 << 20
+
+// readScriptBody 读至多 maxScriptBytes 字节；超限返回明确错误而不是
+// 静默截断——截断的脚本丢给 goja 只会报难以定位的语法错误。
+func readScriptBody(r io.Reader) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, maxScriptBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxScriptBytes {
+		return nil, fmt.Errorf("脚本超过 %d 字节上限", maxScriptBytes)
+	}
+	return b, nil
+}
+
 // LoadFromURL 下载并执行一个 JS 爬虫文件。
 func (e *Engine) LoadFromURL(ctx context.Context, u string) error {
 	if e == nil || e.hc == nil {
@@ -200,7 +217,7 @@ func (e *Engine) LoadFromURL(ctx context.Context, u string) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("下载爬虫失败: %s 返回 HTTP %d", u, resp.StatusCode)
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	b, err := readScriptBody(resp.Body)
 	if err != nil {
 		return fmt.Errorf("读取爬虫失败: %w", err)
 	}

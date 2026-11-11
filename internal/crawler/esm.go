@@ -3,7 +3,6 @@ package crawler
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -657,7 +656,7 @@ func (e *Engine) fetchModule(ctx context.Context, rawURL string) (string, error)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("下载模块 %s 返回 HTTP %d", rawURL, resp.StatusCode)
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	b, err := readScriptBody(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("读取模块失败: %w", err)
 	}
