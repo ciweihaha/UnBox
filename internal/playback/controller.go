@@ -9,9 +9,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/unbox/unbox/internal/player"
@@ -364,10 +366,21 @@ func (c *Controller) probeHLSCodec(ctx context.Context, stream player.Stream) (s
 }
 
 func isHEVC(codec string) bool { return hevcCodecPattern.MatchString(codec) }
+
+// sessionCounter 是会话 ID 回退的唯一性来源。
+var sessionCounter atomic.Uint64
+
 func sessionID() string {
 	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return hex.EncodeToString([]byte(fmt.Sprintf("%d", len(b))))
+	if _, err := rand.Read(b); err == nil {
+		return hex.EncodeToString(b)
 	}
-	return hex.EncodeToString(b)
+	return fallbackSessionID()
+}
+
+// fallbackSessionID 在 crypto/rand 失败时生成唯一 ID：旧回退恒为
+// hex("16") = "3136"，全部会话 ID 冲突；时间戳 + 进程号 + 原子计数
+// 保证每次不同。
+func fallbackSessionID() string {
+	return hex.EncodeToString([]byte(fmt.Sprintf("%d-%d-%d", time.Now().UnixNano(), os.Getpid(), sessionCounter.Add(1))))
 }

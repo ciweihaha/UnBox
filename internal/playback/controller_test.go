@@ -124,6 +124,35 @@ func TestControllerMPVBackendLoadsStream(t *testing.T) {
 // TestPrepareCapsSessions 每次 Web 播放都在会话表里留一条，供 Fallback
 // 降级用；但会话只在降级或关机时清理，长期运行会无限膨胀。本测试断言
 // Prepare 超过上限后最旧的会话被淘汰，且最新会话仍能降级。
+// TestFallbackSessionIDUnique 是回归测试（第 37 轮）：rand 失败时的回退
+// 不能恒为 "3136"（hex("16")），否则全部会话 ID 冲突。
+func TestFallbackSessionIDUnique(t *testing.T) {
+	seen := make(map[string]struct{}, 1000)
+	for i := 0; i < 1000; i++ {
+		id := fallbackSessionID()
+		if id == "" || id == "3136" {
+			t.Fatalf("回退会话 ID 不合法: %q", id)
+		}
+		if _, dup := seen[id]; dup {
+			t.Fatalf("回退会话 ID 重复: %q", id)
+		}
+		seen[id] = struct{}{}
+	}
+}
+
+// TestSessionIDFormat 正常路径：32 位十六进制、每次不同。
+func TestSessionIDFormat(t *testing.T) {
+	a, b := sessionID(), sessionID()
+	if len(a) != 32 || len(b) != 32 || a == b {
+		t.Fatalf("sessionID 应为 32 位十六进制且不同: %q %q", a, b)
+	}
+	for _, c := range a {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			t.Fatalf("sessionID 含非十六进制字符: %q", a)
+		}
+	}
+}
+
 func TestPrepareCapsSessions(t *testing.T) {
 	mpv := &fakePlayer{}
 	web := &fakeProxy{}
