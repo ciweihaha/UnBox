@@ -22,7 +22,9 @@ import (
 	"github.com/unbox/unbox/internal/library/thumb"
 	"github.com/unbox/unbox/internal/playback"
 	"github.com/unbox/unbox/internal/player"
+	"github.com/unbox/unbox/internal/player/failover"
 	"github.com/unbox/unbox/internal/player/mpvplugin"
+	"github.com/unbox/unbox/internal/probe"
 	"github.com/unbox/unbox/internal/provider"
 	"github.com/unbox/unbox/internal/provider/live"
 	"github.com/unbox/unbox/internal/provider/tvbox"
@@ -2282,10 +2284,17 @@ func (s *ShellService) RefreshMPV() (mpvplugin.Status, error) {
 	if err != nil {
 		return status, err
 	}
-	if err := s.playback.SetMPV(p); err != nil {
+	// 与启动路径（cmd/unbox）一致包一层 failover：否则刷新后备用源
+	// 自动切换悄悄丢失，且事件桥接读到的不是同一层 player。
+	wrapped := failover.New(p, probe.NewProber())
+	if err := s.playback.SetMPV(wrapped); err != nil {
 		return status, err
 	}
-	s.player = p
+	// SetMPV 已关闭旧播放器，旧桥接 goroutine 随旧事件通道关闭而退出；
+	// 必须重启桥接，否则刷新后前端再也收不到播放事件（位置/结束/错误）。
+	s.stopPlaybackBridge()
+	s.player = wrapped
+	s.startPlaybackBridge()
 	return status, nil
 }
 
@@ -2362,6 +2371,11 @@ func (s *ShellService) startPlaybackBridge() {
 	}
 	// 信号 channel 与出口都先取到局部变量再交给 goroutine，
 	// 避免 goroutine 与 stop/注入方并发读写 ShellService 字段。
+	// player 同样在启动时快照：RefreshMPV 会替换 s.player，桥接若每轮
+	// 重新读 s.player.Events()，既与替换写 data race，又会在旧通道上
+	// 永久阻塞（或误读新通道造成重复转发）；绑定启动时的实例，换播放器
+	// 时由 RefreshMPV 显式 stop + start 重建桥接。
+	pl := s.player
 	stop := make(chan struct{})
 	s.playbackBridgeMu.Lock()
 	s.playbackBridgeStop = stop
@@ -2371,7 +2385,7 @@ func (s *ShellService) startPlaybackBridge() {
 			select {
 			case <-stop:
 				return
-			case ev, ok := <-s.player.Events():
+			case ev, ok := <-pl.Events():
 				if !ok {
 					return
 				}
