@@ -229,9 +229,9 @@ func installCommandForOS(goos, _ string) string {
 	case "darwin":
 		return "brew install mpv"
 	case "linux":
-		for _, pair := range []struct{ name, command string }{{"apt-get", "sudo apt install mpv"}, {"apt", "sudo apt install mpv"}, {"dnf", "sudo dnf install mpv"}, {"pacman", "sudo pacman -S mpv"}} {
-			if _, err := exec.LookPath(pair.name); err == nil {
-				return pair.command
+		for _, name := range []string{"apt-get", "apt", "dnf", "pacman"} {
+			if _, err := exec.LookPath(name); err == nil {
+				return commandFor(name)
 			}
 		}
 		return "sudo apt install mpv"
@@ -240,5 +240,5 @@ func installCommandForOS(goos, _ string) string {
 	}
 }
 func commandFor(name string) string {
-	return map[string]string{"apt": "sudo apt install mpv", "dnf": "sudo dnf install mpv", "pacman": "sudo pacman -S mpv"}[name]
+	return map[string]string{"apt-get": "sudo apt install mpv", "apt": "sudo apt install mpv", "dnf": "sudo dnf install mpv", "pacman": "sudo pacman -S mpv"}[name]
 }

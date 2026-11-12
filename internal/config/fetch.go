@@ -53,14 +53,18 @@ func NewFetcherWithTimeout(d time.Duration) *Fetcher {
 //
 // clan:// 会被明确拒绝，而不是静默返回空内容或尝试当作本地路径读取。
 func (f *Fetcher) Fetch(ctx context.Context, ref string) ([]byte, error) {
+	// 协议前缀按小写匹配：RFC 3986 的 scheme 不区分大小写，用户粘贴的
+	// "HTTP://..." 之前会落入 default 分支被当成裸本地路径，
+	// 只剩一句误导的「找不到文件」。
+	lower := strings.ToLower(ref)
 	switch {
-	case strings.HasPrefix(ref, "clan://"):
+	case strings.HasPrefix(lower, "clan://"):
 		return nil, fmt.Errorf("clan:// 是 FongMi多线路 安卓客户端本地仓库协议，脱离其运行环境无法解析，不支持: %s", ref)
 
-	case strings.HasPrefix(ref, "http://"), strings.HasPrefix(ref, "https://"):
+	case strings.HasPrefix(lower, "http://"), strings.HasPrefix(lower, "https://"):
 		return f.fetchHTTP(ctx, ref)
 
-	case strings.HasPrefix(ref, "file://"):
+	case strings.HasPrefix(lower, "file://"):
 		return readLocalFile(localPath(ref))
 
 	default:
@@ -97,10 +101,11 @@ func readLocalFile(path string) ([]byte, error) {
 // POSIX 下 "file:///tmp/x.json" 的前导斜杠则是路径本身的一部分，必须保留。
 // 因此只在紧跟着看起来像盘符（单个 ASCII 字母 + 冒号）时才去掉前导斜杠。
 func localPath(ref string) string {
-	if !strings.HasPrefix(ref, "file://") {
+	// 前缀不区分大小写，与 Fetch 的分发一致（"FILE:///tmp/x.json" 同样有效）。
+	if len(ref) < 7 || !strings.EqualFold(ref[:7], "file://") {
 		return ref
 	}
-	p := strings.TrimPrefix(ref, "file://")
+	p := ref[7:]
 	if len(p) >= 3 && p[0] == '/' && isASCIILetter(p[1]) && p[2] == ':' {
 		p = p[1:]
 	}

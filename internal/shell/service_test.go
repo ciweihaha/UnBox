@@ -756,6 +756,43 @@ func TestPlaybackBridgeFiltersTokenAndStops(t *testing.T) {
 	mu.Unlock()
 }
 
+// RefreshMPV 换播放器后必须重建桥接：旧桥接绑定旧实例，旧事件通道关闭
+// 后它自行退出；不重启的话新播放器的事件（位置/结束/错误）永远到不了前端。
+func TestPlaybackBridgeRestartsWithNewPlayer(t *testing.T) {
+	first := newBridgeTestPlayer()
+	svc := newShellService(nil, first, nil)
+
+	var mu sync.Mutex
+	var got []PlaybackEvent
+	svc.playbackEventEmitter = func(ev PlaybackEvent) {
+		mu.Lock()
+		got = append(got, ev)
+		mu.Unlock()
+	}
+
+	if _, ok := svc.claimPlayback(7); !ok {
+		t.Fatal("claimPlayback 应接受首个 token")
+	}
+	svc.startPlaybackBridge()
+	first.events <- player.Event{Kind: player.EventPlaying}
+	waitForBridgeEvents(t, &mu, &got, 1)
+
+	// 模拟 RefreshMPV：停旧桥接、换播放器、起新桥接。
+	second := newBridgeTestPlayer()
+	svc.stopPlaybackBridge()
+	svc.player = second
+	svc.startPlaybackBridge()
+	defer func() { _ = svc.ServiceShutdown() }()
+
+	second.events <- player.Event{Kind: player.EventPosition, Position: 3.5}
+	waitForBridgeEvents(t, &mu, &got, 2)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 2 || got[1] != (PlaybackEvent{Token: 7, Kind: "position", Position: 3.5}) {
+		t.Fatalf("换播放器后新桥接未转发事件: %#v", got)
+	}
+}
+
 func waitForBridgeEvents(t *testing.T, mu *sync.Mutex, got *[]PlaybackEvent, n int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

@@ -227,7 +227,10 @@ func buildArgs(s player.Stream, ipcPath string, wid uintptr) []string {
 	for k, v := range s.Headers {
 		args = append(args, "--http-header-fields="+k+": "+v)
 	}
-	args = append(args, s.URL)
+	// "--" 结束选项解析：播放地址来自远端规则/订阅，可能以 "-" 开头
+	// （如 "--script=..."），不加分隔会被 mpv 当成选项执行。mpv 手册明确
+	// 支持 "--"（其后参数一律按文件名/URL 处理，即使以 "-" 开头）。
+	args = append(args, "--", s.URL)
 	return args
 }
 
