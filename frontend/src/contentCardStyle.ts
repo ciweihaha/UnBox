@@ -10,5 +10,6 @@ export function contentCardStyleLabel(value: ContentCardStyle): string {
 }
 
 export function normalizeContentCardStyle(value: string | null | undefined): ContentCardStyle {
-  return value === 'grid' ? 'grid' : 'list'
+  // Netflix 改版（v0.9.9）起默认是海报卡片；只有明确存过「列表」才用列表。
+  return value === 'list' ? 'list' : 'grid'
 }

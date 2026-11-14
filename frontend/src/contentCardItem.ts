@@ -23,6 +23,8 @@ export interface ContentCardItem {
   detail: string
   /** 卡片模式的进度徽标；为空时整块不渲染（收藏与点播列表都没有进度）。 */
   progress?: ContentCardProgress
+  /** 已播比例 0–1（仅继续观看行有）：卡片下方画一条红色进度条。 */
+  progressRatio?: number
 }
 
 /** contentCardSubtitle 拼出列表模式第二行的文本。 */

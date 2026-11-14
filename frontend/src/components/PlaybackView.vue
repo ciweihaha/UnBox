@@ -598,6 +598,7 @@ onBeforeUnmount(() => {
         <div class="seek-slot">
           <span v-if="seekHover !== null" class="seek-bubble" :style="{ left: (seekHover * 100) + '%' }">{{ formatTime((seekHover ?? 0) * (duration || 0)) }}</span>
           <input class="ctrl-seek" type="range" min="0" :max="duration || 0" step="0.1" :value="currentTime"
+            :style="{ '--seek-fill': (duration ? Math.round(Math.min(1, Math.max(0, currentTime / duration)) * 100) : 0) + '%' }"
             aria-label="播放进度" @input="onSeekInput" @mousemove="onSeekHover" @mouseleave="onSeekLeave" @click.stop />
         </div>
         <div class="rate-control">
