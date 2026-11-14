@@ -18,25 +18,109 @@ body {
   color: var(--text);
 }
 
+/* 应用外壳：左侧导航栏 + 右侧内容区。导航收起后只留图标首字（见 .sidebar-collapsed）。 */
 .container {
   height: 100vh;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
   text-align: left;
-  padding: 0.9rem 1.1rem;
-  max-width: 1280px;
-  margin: 0 auto;
   overflow: hidden;
 }
 
-.title {
-  font-size: 1.5rem;
-  margin: 0;
+.container.sidebar-collapsed {
+  grid-template-columns: 60px minmax(0, 1fr);
 }
 
-.subtitle {
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0.75rem;
+  padding: 0.9rem 0.75rem;
+  background: var(--panel);
+  border-right: 1px solid var(--panel-border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0 0.25rem;
+}
+
+.brand-logo {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+}
+
+.brand-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.sidebar-toggle {
+  flex: 0 0 auto;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.9rem;
+  line-height: 1.4;
   color: var(--text-dim);
-  margin: 0.2rem 0 0.9rem;
+  background: transparent;
+  border: none;
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+
+.sidebar-toggle:hover {
+  background: var(--btn-bg);
+  color: var(--text);
+}
+
+.sidebar-foot {
+  border-top: 1px solid var(--panel-border);
+  padding-top: 0.75rem;
+}
+
+.sidebar-status {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+/* 收起态：品牌名、导航文字与状态行隐藏，导航按钮只留图标首字居中。 */
+.sidebar-collapsed .brand-name,
+.sidebar-collapsed .nav-label,
+.sidebar-collapsed .sidebar-status {
+  display: none;
+}
+
+.sidebar-collapsed .brand {
+  justify-content: center;
+  padding: 0;
+}
+
+/* 收起态只留「展开」按钮：图标与品牌名都藏掉，留出位置给它。 */
+.sidebar-collapsed .brand-logo {
+  display: none;
+}
+
+.sidebar-collapsed .tabs button {
+  justify-content: center;
+  padding: 0.55rem 0;
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.9rem 1.1rem;
+  overflow: hidden;
 }
 
 .status {
@@ -613,32 +697,134 @@ body {
   flex-shrink: 0;
 }
 
-.vod-detail-top {
+/* 详情页 Hero：海报模糊放大做背景 + 前景竖版海报 + 标题/元信息/简介。 */
+.vod-detail-hero {
+  position: relative;
+  flex: 0 0 auto;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  isolation: isolate;
+}
+
+.vod-hero-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.vod-hero-bg img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(24px) brightness(0.55);
+  transform: scale(1.15);
+}
+
+.vod-hero-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.15) 60%, transparent 100%);
+}
+
+.vod-hero-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 1.25rem;
+  align-items: flex-start;
+  padding: 1.25rem 1.5rem;
+}
+
+.vod-hero-poster {
+  flex: 0 0 auto;
+  width: 160px;
+  aspect-ratio: 2 / 3;
+  overflow: clip;
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.vod-hero-poster .poster {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--row-alt);
+}
+
+.vod-hero-poster .content-card-fallback {
+  font-size: 4rem;
+}
+
+.vod-hero-info {
+  min-width: 0;
+  flex: 1;
+  color: var(--text-white);
+}
+
+.vod-hero-info h2 {
+  margin: 0 0 0.4rem;
+  color: var(--text-white);
+  font-size: 1.4rem;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
+}
+
+.vod-hero-info .meta {
+  margin: 0 0 0.5rem;
+  color: rgba(255, 255, 255, 0.82);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.vod-hero-remarks {
+  display: inline-block;
+  margin: 0 0 0.6rem;
+  padding: 0.15rem 0.6rem;
+  color: var(--accent);
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+
+.vod-hero-info .favorite-toggle {
+  display: block;
+  margin: 0 0 0.6rem;
+  color: var(--text-white);
+  background: rgba(0, 0, 0, 0.4);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* 详情主体：播放器在左占大头，选集面板在右固定 300px；窄窗时上下叠放。 */
+.vod-detail-main {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 300px;
   gap: 1rem;
-  align-items: stretch;
+  align-items: start;
   flex: 1;
   min-height: 0;
   margin-bottom: 0.75rem;
 }
 
-.vod-detail-top.info-collapsed {
-  grid-template-columns: minmax(0, 1fr) 34px;
+@media (max-width: 900px) {
+  .vod-detail-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
-.vod-detail-top .vod-player {
+.vod-detail-main .vod-player {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  height: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
   margin: 0;
 }
 
-.vod-detail-top .vod-player .playback-view {
+.vod-detail-main .vod-player .playback-view {
   flex: 0 0 auto;
   width: 100%;
   height: auto;
@@ -648,38 +834,29 @@ body {
   contain: layout paint;
 }
 
-.vod-info {
+.vod-episodes {
   display: flex;
   flex-direction: column;
+  gap: 0.6rem;
   min-width: 0;
   min-height: 0;
-  max-height: 100%;
-  overflow: hidden;
+  padding: 0.75rem;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
 }
 
-.vod-info .info-toggle {
-  align-self: flex-end;
+.vod-episodes .ep-src-tabs {
+  margin: 0;
 }
 
-.vod-info .info-body {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
+.vod-episodes .ep-pagination-wrap {
+  margin: 0;
 }
 
-.vod-info.collapsed .info-body {
-  display: none;
-}
-
-.vod-detail .poster {
-  display: block;
-  width: 100%;
-  max-width: 220px;
-  margin: 0 auto 0.6rem;
-  border-radius: 0.4rem;
-  background: var(--row-alt);
+.vod-episodes .ep-list {
+  grid-template-columns: repeat(auto-fill, minmax(4rem, 1fr));
+  max-height: 22rem;
 }
 
 .channel .group {
@@ -835,7 +1012,7 @@ body {
   bottom: 0.15rem;
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.35rem;
   padding: 0.1rem 0.2rem;
   background: transparent;
 }
@@ -847,9 +1024,9 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 1.65rem;
-  min-width: 1.65rem;
-  padding: 0 0.3rem;
+  height: 1.9rem;
+  min-width: 1.9rem;
+  padding: 0 0.35rem;
   color: #fff;
   background: transparent;
   border: 1px solid transparent;
@@ -1052,10 +1229,35 @@ body {
   .layout > .player { grid-area: player; min-height: 260px; }
   .layout > .channels { grid-area: channels; min-height: 18rem; }
 }
-.vod-detail .desc { color: var(--text-desc); line-height: 1.6; max-height: 14rem; overflow-y: auto; }
+/* 简介默认限 3 行 + 展开/收起；展开后放开全部。 */
+.vod-detail .desc {
+  color: var(--text-desc);
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.vod-detail .desc.expanded {
+  display: block;
+  -webkit-line-clamp: unset;
+  max-height: 14rem;
+  overflow-y: auto;
+}
 .vod-detail .desc p { margin: 0.3rem 0; }
+.desc-toggle {
+  margin-top: 0.4rem;
+  padding: 0.2rem 0.6rem;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  border-radius: 0.3rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.desc-toggle:hover { background: rgba(255, 255, 255, 0.12); }
 
-.tabs .settings-btn { margin-left: auto; }
+.tabs .settings-btn { margin-top: auto; }
 
 .settings-page { flex: 1; min-height: 0; overflow-y: auto; }
 
@@ -1415,6 +1617,174 @@ body {
 .home h2 { margin: 0.25rem 0 0.75rem; }
 .home-empty { color: var(--text-dim); }
 
+/* 首页 Hero：继续观看的第一部做焦点，海报模糊放大当背景 + 前景海报 + 进度条。 */
+.home-hero {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  isolation: isolate;
+}
+
+.home-hero-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.home-hero-bg img,
+.home-hero-fallback {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.home-hero-bg img {
+  filter: blur(24px) brightness(0.55);
+  transform: scale(1.15);
+}
+
+.home-hero-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.15) 60%, transparent 100%);
+}
+
+.home-hero-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 1.25rem;
+  align-items: center;
+  min-height: 11rem;
+  padding: 1.25rem 1.5rem;
+}
+
+.home-hero-poster {
+  flex: 0 0 auto;
+  width: 120px;
+  aspect-ratio: 2 / 3;
+  overflow: clip;
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.home-hero-poster img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.home-hero-info {
+  min-width: 0;
+  color: var(--text-white);
+}
+
+.home-hero-kicker {
+  margin: 0 0 0.35rem;
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.home-hero-info h2 {
+  margin: 0 0 0.4rem;
+  color: var(--text-white);
+  font-size: 1.5rem;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
+}
+
+.home-hero-meta {
+  margin: 0 0 0.75rem;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.9rem;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.home-hero-progress {
+  width: min(22rem, 100%);
+  height: 4px;
+  margin-bottom: 0.9rem;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.28);
+  border-radius: 2px;
+}
+
+.home-hero-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+.home-hero-play {
+  padding: 0.55rem 1.25rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #08130a;
+  background: var(--accent);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.home-hero-play:hover {
+  filter: brightness(1.1);
+}
+
+/* 木纹主题的强调色是深棕，亮色按钮配深字会糊：该主题下改白字。 */
+[data-theme="wood"] .home-hero-play {
+  color: #fff;
+}
+
+/* 首页分类快捷入口：分类已加载过才出现（进过一次点播就有），首屏不额外拉取。 */
+.home-cats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.home-cats-title {
+  margin-right: 0.35rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.home-cat-chip {
+  padding: 0.3rem 0.8rem;
+  font-size: 0.85rem;
+  color: var(--text-soft);
+  background: var(--btn-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.home-cat-chip:hover {
+  color: var(--text);
+  background: var(--btn-hover);
+}
+
+/* 继续观看横排：卡片模式下横向滚动一行，列表模式保持竖排（跟随用户的展示样式设置）。 */
+.home-continue.content-card-grid {
+  display: flex;
+  padding: var(--content-gap) 0.25rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.home-continue.content-card-grid .content-card {
+  flex: 0 0 var(--content-col);
+}
+
 .favorites-page { flex: 1; min-height: 0; overflow-y: auto; }
 .favorites-page h2 { margin: 0.25rem 0 0.75rem; }
 .favorites-list { margin: 0; padding: 0; list-style: none; }
@@ -1467,7 +1837,8 @@ body {
   white-space: nowrap;
 }
 
-/* 内容卡片网格：海报作为卡片底图，站点/进度/标题叠加在半透明文字框中。 */
+/* 内容卡片网格：海报 2:3 在上，标题与副标题在海报下方正常排布；
+   站点/进度徽标与播放按钮仍叠在海报上。 */
 .content-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--content-col)), 1fr));
@@ -1478,24 +1849,42 @@ body {
 
 .content-card-grid .content-card {
   position: relative;
-  display: block;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  aspect-ratio: 2 / 3;
-  /* 裁圆角用 clip 而不是 hidden：hidden 会把卡片变成滚动容器，浏览器就不拿
-     aspect-ratio 去撑它的自动网格行，行高只剩 168px 而海报有 255px，整列海报叠在一起。
-     clip 只裁到边框盒，不建滚动容器，行高回到海报真实高度，row-gap 才真的生效。
-     引擎不支持 clip 时退回 visible（行高同样正确），最多丢掉圆角裁切。 */
+  /* 裁圆角用 clip 而不是 hidden：hidden 会把卡片变成滚动容器，旧版靠
+     aspect-ratio 撑行高时整列海报会叠在一起；clip 只裁到边框盒，不建
+     滚动容器。引擎不支持 clip 时退回 visible，最多丢掉圆角裁切。 */
   overflow: clip;
   padding: 0;
-  background: var(--row-alt);
-  border: 1px solid var(--panel-border);
-  border-radius: 0.4rem;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-lg);
   isolation: isolate;
+  transition: transform 0.2s ease;
 }
 
-.content-card-grid .content-card:hover { background: var(--btn-bg); }
+.content-card-grid .content-card:hover {
+  transform: translateY(-2px);
+}
 
-.content-card-grid .content-card > .thumb {
+/* 海报框定高：2:3 由它承担，标题在框外正常排布。 */
+.content-card-poster {
+  position: relative;
+  display: block;
+  aspect-ratio: 2 / 3;
+  overflow: clip;
+  background: var(--row-alt);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  transition: box-shadow 0.2s ease;
+}
+
+.content-card-grid .content-card:hover .content-card-poster {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.content-card-poster > .thumb {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -1503,6 +1892,48 @@ body {
   object-fit: cover;
   border-radius: 0;
   z-index: 0;
+  transition: transform 0.25s ease;
+}
+
+.content-card-grid .content-card:hover .content-card-poster > .thumb {
+  transform: scale(1.06);
+}
+
+/* 无海报时的渐变封面：首字居中大字，背景由 posterGradient 按标题生成。 */
+.content-card-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 3rem;
+  font-weight: 700;
+  z-index: 0;
+}
+
+/* 悬停播放按钮：平时隐藏，悬停浮现，点整张卡片都是播放。 */
+.content-card-play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 50%;
+  font-size: 1rem;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.8);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+}
+
+.content-card-grid .content-card:hover .content-card-play {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
 }
 
 .content-card-badge {
@@ -1529,9 +1960,9 @@ body {
   text-overflow: ellipsis;
 }
 
+/* 进度徽标钉在海报底部：标题已移到海报下方，不再需要给标题蒙层留 2rem 空隙。 */
 .content-card-progress {
-  bottom: 2.4rem; /* 标题蒙层钉在卡底 0.35rem、整高约 1.67rem，顶边离卡底 ~2.02rem；
-                     留到 2.4rem 才不会和标题黑底黏在一起。改标题字号/内边距时一并复核。 */
+  bottom: 0.35rem;
   right: auto;
   max-width: calc(100% - 0.7rem);
   white-space: nowrap;
@@ -1541,14 +1972,25 @@ body {
 .content-card-progress .cc-prog { margin-left: 0.5rem; }
 
 .content-card-title {
-  bottom: 0.35rem;
-  font-size: 0.98rem;
+  margin-top: 0.45rem;
+  overflow: hidden;
+  font-size: 0.95rem;
   font-weight: 600;
-  text-align: center;
+  line-height: 1.3;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .content-card-title .scrollx-inner { display: inline-block; }
+
+.content-card-sub {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 
 .content-card-delete-mask {
   position: absolute;
@@ -1803,7 +2245,7 @@ body {
   white-space: nowrap;
 }
 
-.tabs .settings-btn { margin-left: auto; }
+.tabs .settings-btn { margin-top: auto; }
 
 .log-view {
   margin: 0;
@@ -1943,6 +2385,10 @@ body {
   --content-col: 148px;
   --content-gap: 0.75rem;
   --vod-rail: 128px;
+
+  /* 圆角层级：卡片与 Hero 用大圆角，面板与按钮用中圆角。 */
+  --radius-lg: 0.75rem;
+  --radius-md: 0.5rem;
 }
 
 /* 多彩渐变毛玻璃：多色渐变背景固定附着 + 半透明面板 + backdrop-blur */
@@ -2254,26 +2700,60 @@ body[data-theme="8bit"],
 
 /* ---- 顶部切换 + 导入进度 + 加载直播 ---- */
 
+/* 左侧导航：纵向排列，图标首字 + 文字；设置沉底。 */
 .tabs {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 0.25rem;
+  margin-bottom: 0;
+  overflow-y: auto;
 }
 
 .tabs button {
-  padding: 0.4rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.55rem 0.75rem;
   font-size: 0.95rem;
+  text-align: left;
   color: var(--text-soft);
-  background: var(--btn-bg);
-  border: 1px solid var(--border);
-  border-radius: 0.4rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   cursor: pointer;
+}
+
+.tabs button:hover {
+  background: var(--btn-bg);
 }
 
 .tabs button.active {
   background: var(--btn-active-bg);
   color: var(--text-white);
   border-color: var(--border-light);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.tabs button .nav-icon {
+  flex: 0 0 auto;
+  width: 1.25rem;
+  text-align: center;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.tabs button.active .nav-icon {
+  color: var(--accent);
+}
+
+.tabs button .nav-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .progress {
@@ -2437,8 +2917,7 @@ body[data-theme="8bit"],
   font-size: 0.85rem;
 }
 
-.vod-cats .cats-toggle,
-.vod-info .info-toggle {
+.vod-cats .cats-toggle {
   padding: 0.05rem 0.45rem;
   font-size: 0.9rem;
   line-height: 1.4;
@@ -2449,8 +2928,7 @@ body[data-theme="8bit"],
   cursor: pointer;
 }
 
-.vod-cats .cats-toggle:hover,
-.vod-info .info-toggle:hover {
+.vod-cats .cats-toggle:hover {
   background: var(--btn-bg);
   color: var(--text);
 }
@@ -2581,7 +3059,9 @@ body[data-theme="8bit"],
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* Hero + 播放器 + 选集面板整体可纵向滚动：矮窗口下不裁内容。 */
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 1rem;
 }
 
@@ -2899,51 +3379,47 @@ body[data-theme="8bit"],
   font-variant-numeric: tabular-nums;
 }
 
-/* 点播筛选：筛选按钮 + 抽屉弹层 + 维度下拉。 */
-.vod-filter-toggle {
-  flex: 0 0 auto;
-  margin-left: auto;
-  padding: 0.3rem 0.6rem;
-  border: 1px solid var(--panel-border);
-  border-radius: 0.35rem;
-  background: var(--btn-bg);
-  color: var(--text);
-  cursor: pointer;
-}
-.vod-filter-toggle.has-filter { border-color: var(--btn-active-bg); color: var(--btn-active-bg); }
-.vod-filter-mask {
-  position: fixed; inset: 0; z-index: 50;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
-}
-.vod-filter-card {
-  display: flex; flex-direction: column; gap: 0.75rem;
-  min-width: min(22rem, 90vw);
-  padding: 0.9rem;
+/* 点播筛选 chip 行：直接嵌在列表上方，点选即应用，不再弹层确认。 */
+.vod-filter-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem 1rem;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.75rem;
   background: var(--panel);
   border: 1px solid var(--panel-border);
-  border-radius: 0.5rem;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius-md);
 }
-.vod-filter-panel { display: flex; flex-direction: column; gap: 0.6rem; }
-.vod-filter-dim { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
-.vod-filter-name { color: var(--text-dim); flex: 0 0 auto; }
-.vod-filter-dim .themed-select { flex: 1; min-width: 0; }
-.vod-filter-dim .themed-select-trigger {
-  width: 100%;
-  justify-content: space-between;
-  padding: 0.3rem 0.5rem;
-  font-size: 0.9rem;
-  border-color: var(--panel-border);
-  border-radius: 0.35rem;
+.vod-filter-panel { display: flex; flex-direction: column; gap: 0.5rem; flex: 1; min-width: 0; }
+.vod-filter-dim { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.vod-filter-name { color: var(--text-dim); font-size: 0.85rem; flex: 0 0 auto; }
+.vod-filter-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; min-width: 0; }
+.vod-filter-chip {
+  padding: 0.25rem 0.7rem;
+  font-size: 0.85rem;
+  color: var(--text-soft);
+  background: var(--btn-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
 }
-.vod-filter-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
-.vod-filter-actions button {
-  padding: 0.3rem 0.9rem;
-  border: 1px solid var(--panel-border); border-radius: 0.35rem;
-  background: var(--btn-bg); color: var(--text); cursor: pointer;
+.vod-filter-chip:hover { color: var(--text); background: var(--btn-hover); }
+.vod-filter-chip.active {
+  color: var(--text-white);
+  background: var(--btn-active-bg);
+  border-color: var(--accent);
 }
-.vod-filter-actions button.primary { background: var(--btn-active-bg); color: var(--text-white); border-color: var(--btn-active-bg); }
+.vod-filter-clear {
+  flex: 0 0 auto;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.85rem;
+  color: var(--text-soft);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.vod-filter-clear:hover { color: var(--text); background: var(--btn-bg); }
 
 /* 刷新按钮：与其它工具钮同观感（不丢进度重载当前视频） */
 .player-tools .refresh-btn {

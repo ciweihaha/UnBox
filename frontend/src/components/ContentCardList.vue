@@ -4,10 +4,11 @@
 // 首页观看记录、点播收藏、点播列表、搜索结果四处结构相同，此前各自复制了一份
 // 卡片标记；归一成 ContentCardItem 后由本组件统一渲染。
 //
-// 列表模式统一为两行（片名 / 站点·补充），卡片模式的徽标仍按原有类名输出，
-// 因此样式表里 .content-card-* 那一套不需要任何改动。
+// 列表模式统一为两行（片名 / 站点·补充）；卡片模式为海报在上（2:3，站点/进度
+// 徽标与播放按钮叠在海报上）、标题与副标题在海报下方，无海报时按标题生成
+// 稳定渐变封面。徽标与标题仍按原有类名输出，样式表只改它们的定位方式。
 import { computed, ref } from 'vue'
-import { contentCardSubtitle, type ContentCardItem } from '../contentCardItem'
+import { contentCardSubtitle, posterGradient, type ContentCardItem } from '../contentCardItem'
 import { imgError, scrollxEnter, scrollxLeave } from '../contentListDom'
 import { listAtBottom } from '../vodPagination'
 import type { ContentCardStyle } from '../contentCardStyle'
@@ -144,16 +145,24 @@ defineExpose({
         @click="emit('select', index)"
         @contextmenu="onContextMenu(index, $event)"
       >
-      <img v-if="item.logo" :src="item.logo" class="thumb" loading="lazy" referrerpolicy="no-referrer" @error="imgError" />
+      <img v-if="style !== 'grid' && item.logo" :src="item.logo" class="thumb" loading="lazy" referrerpolicy="no-referrer" @error="imgError" />
       <template v-if="style === 'grid'">
-        <span v-if="item.site" class="content-card-badge content-card-site">{{ item.site }}</span>
-        <span v-if="item.progress" class="content-card-badge content-card-progress scrollx" @mouseenter="scrollxEnter" @mouseleave="scrollxLeave">
-          <span class="scrollx-inner">
-            <span v-if="item.progress.ep" class="cc-ep">{{ item.progress.ep }}</span>
-            <span v-if="item.progress.text" class="cc-prog">{{ item.progress.text }}</span>
+        <!-- 卡片模式：海报 2:3 在上（徽标/进度/播放按钮叠在海报上），标题与副标题
+             在海报下方正常排布，不再压在图上；无海报时用标题生成的稳定渐变封面。 -->
+        <span class="content-card-poster">
+          <img v-if="item.logo" :src="item.logo" class="thumb" loading="lazy" referrerpolicy="no-referrer" @error="imgError" />
+          <span v-else class="content-card-fallback" :style="{ background: posterGradient(item.title) }" aria-hidden="true">{{ item.title.slice(0, 1) }}</span>
+          <span v-if="item.site" class="content-card-badge content-card-site">{{ item.site }}</span>
+          <span v-if="item.progress" class="content-card-badge content-card-progress scrollx" @mouseenter="scrollxEnter" @mouseleave="scrollxLeave">
+            <span class="scrollx-inner">
+              <span v-if="item.progress.ep" class="cc-ep">{{ item.progress.ep }}</span>
+              <span v-if="item.progress.text" class="cc-prog">{{ item.progress.text }}</span>
+            </span>
           </span>
+          <span class="content-card-play" aria-hidden="true">▶</span>
         </span>
-        <span class="content-card-badge content-card-title scrollx" @mouseenter="scrollxEnter" @mouseleave="scrollxLeave"><span class="scrollx-inner">{{ item.title }}</span></span>
+        <span class="content-card-title scrollx" @mouseenter="scrollxEnter" @mouseleave="scrollxLeave"><span class="scrollx-inner">{{ item.title }}</span></span>
+        <span v-if="item.detail || item.site" class="content-card-sub">{{ item.detail || item.site }}</span>
         <div v-if="deletable && activeDeleteKey === item.key" class="content-card-delete-mask" @click.stop>
           <button type="button" class="content-card-delete-action" @click.stop="emit('requestDelete')">删除</button>
         </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { contentCardSubtitle, historyCardItem, type ContentCardItem } from './contentCardItem'
+import { contentCardSubtitle, historyCardItem, posterGradient, type ContentCardItem } from './contentCardItem'
 
 const base: ContentCardItem = {
   key: 'k',
@@ -56,5 +56,23 @@ describe('historyCardItem', () => {
     const item = historyCardItem('k', '', '某剧', '站点A', '', '')
     expect(contentCardSubtitle(item)).toBe('站点A')
     expect(item.progress).toBeUndefined()
+  })
+})
+
+describe('posterGradient', () => {
+  it('同一标题永远同一渐变', () => {
+    expect(posterGradient('某剧')).toBe(posterGradient('某剧'))
+  })
+
+  it('不同标题色相不同', () => {
+    expect(posterGradient('某剧')).not.toBe(posterGradient('另一部剧'))
+  })
+
+  it('输出合法的两段深色渐变', () => {
+    expect(posterGradient('某剧')).toMatch(/^linear-gradient\(135deg, hsl\(\d+ 45% 32%\) 0%, hsl\(\d+ 55% 22%\) 100%\)$/)
+  })
+
+  it('空标题也有确定输出', () => {
+    expect(posterGradient('')).toBe('linear-gradient(135deg, hsl(0 45% 32%) 0%, hsl(40 55% 22%) 100%)')
   })
 })

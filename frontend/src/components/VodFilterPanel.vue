@@ -1,10 +1,10 @@
 <script setup lang="ts">
-// VodFilterPanel.vue — 点播筛选弹层内容：按维度渲染下拉单选，选择实时回传。
-// 下拉用 ThemedSelect（浮层复用 .history-dropdown），避免原生 <select>
-// 在暗色主题下弹出系统白底列表。
+// VodFilterPanel.vue — 点播筛选 chip 行：按维度渲染单选 chips，点选即回传。
+// 与旧版下拉同一份数据模型（FilterGroup[] + modelValue，nextSelections 单选
+// 替换），只改呈现：下拉要两次点击（展开→选），chip 一次点选直接生效；
+// 未传选中值时默认第一项（一般即「全部」）高亮，与 initialSelections 一致。
 import type { FilterGroup } from '../../bindings/github.com/unbox/unbox/internal/provider/models'
 import { nextSelections } from '../vodFilters'
-import ThemedSelect from './ThemedSelect.vue'
 
 const props = defineProps<{
   groups: FilterGroup[]
@@ -15,18 +15,28 @@ const emit = defineEmits<{ 'update:modelValue': [Record<string, string>] }>()
 function onPick(key: string, value: string) {
   emit('update:modelValue', nextSelections(props.modelValue, key, value))
 }
+
+function activeValue(key: string): string {
+  if (props.modelValue[key] !== undefined) return props.modelValue[key]
+  return (props.groups.find(g => g.key === key)?.options ?? [])[0]?.value ?? ''
+}
 </script>
 
 <template>
   <div class="vod-filter-panel">
     <div v-for="g in groups" :key="g.key" class="vod-filter-dim">
       <span class="vod-filter-name">{{ g.name }}</span>
-      <ThemedSelect
-        :model-value="modelValue[g.key] ?? (g.options ?? [])[0]?.value ?? ''"
-        :options="g.options ?? []"
-        :aria-label="g.name"
-        @update:model-value="(v) => onPick(g.key, v)"
-      />
+      <span class="vod-filter-chips">
+        <button
+          v-for="o in g.options"
+          :key="o.value"
+          type="button"
+          class="vod-filter-chip"
+          :class="{ active: activeValue(g.key) === o.value }"
+          :aria-pressed="activeValue(g.key) === o.value"
+          @click="onPick(g.key, o.value)"
+        >{{ o.name }}</button>
+      </span>
     </div>
   </div>
 </template>
