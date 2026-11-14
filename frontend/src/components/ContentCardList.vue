@@ -161,6 +161,7 @@ defineExpose({
           </span>
           <span class="content-card-play" aria-hidden="true">▶</span>
         </span>
+        <span v-if="item.progressRatio != null" class="content-card-progressbar" aria-hidden="true"><i :style="{ width: Math.round(Math.min(1, Math.max(0, item.progressRatio)) * 100) + '%' }"></i></span>
         <span class="content-card-title scrollx" @mouseenter="scrollxEnter" @mouseleave="scrollxLeave"><span class="scrollx-inner">{{ item.title }}</span></span>
         <span v-if="item.detail || item.site" class="content-card-sub">{{ item.detail || item.site }}</span>
         <div v-if="deletable && activeDeleteKey === item.key" class="content-card-delete-mask" @click.stop>

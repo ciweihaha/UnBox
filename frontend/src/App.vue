@@ -242,22 +242,20 @@ const donationStatus = ref<DonationStatus>('idle')
 const donationViewState = computed(() => donationView(donationStatus.value, donationLeaderboard.value.Donors))
 const donationUpdatedText = computed(() => formatUpdatedAt(donationLeaderboard.value.UpdatedAt))
 const catsCollapsed = ref(false)
-// 左侧导航折叠态：收起后只留图标首字，纵向空间还给内容。
-const sidebarCollapsed = ref(false)
 // 详情简介展开态：默认限 3 行，点「展开简介」放开。
 const descExpanded = ref(false)
 // 换一部剧时简介回到默认的 3 行收起态。
 watch(vodDetail, () => { descExpanded.value = false })
 
 const themeOptions = [
-  { id: 'default', label: '默认' },
+  { id: 'default', label: 'Netflix 风格' },
   { id: 'aurora', label: '多彩渐变' },
   { id: 'wood', label: '木纹' },
   { id: 'ocean', label: '海洋' },
   { id: '8bit', label: '8bit' },
 ]
 const currentTheme = ref('default')
-const contentCardStyle = ref<ContentCardStyle>('list')
+const contentCardStyle = ref<ContentCardStyle>('grid')
 
 // 播放设置：设置页展示的三个开关，点播会话协调器后续读取同一份运行时状态。
 const playbackSettingsStore = createPlaybackSettings(
@@ -369,14 +367,18 @@ function openVodSourceDead(site: string, vodTitle: string, origin: VodDetailOrig
 
 // 四处内容列表共用 ContentCardList，各自把原始数据归一成 ContentCardItem。
 // 数组与源数据一一对应：组件只回传下标，父级用它取回自己的对象。
-const homeCardItems = computed<ContentCardItem[]>(() => homeHistory.value.map(h => historyCardItem(
-  h.Site + h.VodID,
-  h.VodLogo,
-  h.VodTitle,
-  h.SiteName || h.Site,
-  h.EpName,
-  fmtProgress(h.Progress),
-)))
+// 继续观看行另带已播比例：卡片下方画红色进度条（Netflix 风格）。
+const homeCardItems = computed<ContentCardItem[]>(() => homeHistory.value.map(h => ({
+  ...historyCardItem(
+    h.Site + h.VodID,
+    h.VodLogo,
+    h.VodTitle,
+    h.SiteName || h.Site,
+    h.EpName,
+    fmtProgress(h.Progress),
+  ),
+  progressRatio: h.Duration ? Math.min(1, Math.max(0, h.Progress / h.Duration)) : undefined,
+})))
 
 // 首页 Hero 取观看记录的第一条：焦点大图 + 继续播放入口。
 const heroItem = computed(() => homeHistory.value[0] ?? null)
@@ -386,10 +388,85 @@ const heroProgress = computed(() => {
   return Math.min(1, Math.max(0, h.Progress / h.Duration))
 })
 
+// 顶部导航在首页横幅上的滚动态：横幅顶部通透，下滑后变实底。
+const navScrolled = ref(false)
+function onHomeScroll(event: Event) {
+  navScrolled.value = (event.target as HTMLElement).scrollTop > 24
+}
+
+// 顶部导航高亮：点播页按当前分类名归属到电影 / 电视剧。
+const navActive = computed(() => {
+  if (mode.value === 'home') return 'home'
+  if (mode.value === 'live') return 'live'
+  if (mode.value === 'favorites') return 'favorites'
+  if (mode.value === 'library') return 'library'
+  if (mode.value === 'vod') {
+    const title = vodCategories.value.find(c => c.ID === vodActiveCat.value)?.Title ?? ''
+    if (title.includes('电影')) return 'movies'
+    if (title.includes('电视') || title.includes('连续剧') || title.includes('剧集')) return 'tv'
+    return 'vod'
+  }
+  return ''
+})
+
+// 首页海报行：为你精选 / Top 10 取当前点播分类已加载的第一页真实列表，
+// 我的片单行取真实收藏。没有数据时行整体不渲染，不编造占位内容。
+const featuredRowItems = computed(() => vodCardItems.value.slice(0, 10))
+const top10Items = computed(() => visibleVodItems.value.slice(0, 10))
+const favoriteRowItems = computed(() => favoriteCardItems.value.slice(0, 10))
+
+// 详情弹窗里的「更多类似内容」：与当前详情同一份真实列表（搜索进来用搜索
+// 结果，否则用点播列表），去掉正在看的这一部，取前 8 个。
+const similarSourceItems = computed<VodItem[]>(() => {
+  if (!vodDetail.value) return []
+  const source = vodDetailOrigin.value === 'search' ? vodSearchItems.value : vodListItems.value
+  return source.filter(it => it.ID !== vodDetail.value?.ID).slice(0, 8)
+})
+const similarItems = computed<ContentCardItem[]>(() => similarSourceItems.value.map(vodCardItem))
+
 // 首页分类快捷入口：进点播后选中该分类（复用点播页自己的选分类逻辑）。
 async function goVodCategory(id: string) {
   await switchMode('vod')
   await selectVodCategory(id)
+}
+
+// 顶部导航的电影 / 电视剧入口：按分类名找真实分类（站点命名不一，
+// 「连续剧」「剧集」都算电视剧）；找不到就只进点播列表，不编分类。
+async function goVodCategoryByTitle(title: string, ...fallbacks: string[]) {
+  await switchMode('vod')
+  const names = [title, ...fallbacks]
+  const hit = vodCategories.value.find(c => names.some(n => (c.Title ?? '').includes(n)))
+  if (hit) await selectVodCategory(hit.ID)
+}
+
+// 横幅「更多信息」：用观看记录的真实站点 + ID 打开详情；返回时回首页。
+async function openHeroDetail() {
+  const h = heroItem.value
+  if (!h) return
+  await openVodDetail({
+    ID: h.VodID,
+    Title: h.VodTitle,
+    Logo: h.VodLogo,
+    Group: '',
+    Site: h.Site,
+  })
+  vodDetailOrigin.value = 'home'
+}
+
+// 详情弹窗里点「更多类似内容」：进新详情，但返回目标保持进弹窗前那一页
+// （搜索进来仍回搜索结果，不丢现场）。
+async function openSimilarVodDetail(item: VodItem) {
+  const origin = vodDetailOrigin.value
+  await openVodDetail(item)
+  vodDetailOrigin.value = origin
+}
+
+// 横向海报行的左右箭头：按轨道可视宽度的 85% 平滑滚动。
+function scrollRow(event: MouseEvent, direction: number) {
+  const wrap = (event.currentTarget as HTMLElement).parentElement
+  const track = wrap?.querySelector('ul, .netflix-top10')
+  if (!track) return
+  track.scrollBy({ left: direction * track.clientWidth * 0.85, behavior: 'smooth' })
 }
 
 const favoriteCardItems = computed<ContentCardItem[]>(() => vodFavorites.value.map(f => ({
@@ -550,7 +627,7 @@ async function switchMode(m: 'home' | 'vod' | 'live' | 'library' | 'search' | 'f
     vodDetail.value = null
     await loadVodFavorites()
   }
-  else if (m === 'home') await refreshHome()
+  else if (m === 'home') { navScrolled.value = false; await refreshHome() }
   else if (m === 'library') { await loadLibrary(); await refreshHome() }
   else if (m === 'settings') { await reloadSourceHistory(); await reloadInsecureTLSHosts(); await refreshLogs(); await loadSearchThreads(); await loadSearchCacheTTL(); await playbackSettingsStore.load() }
 }
@@ -564,6 +641,16 @@ async function refreshHome() {
       return poster ? { ...item, VodLogo: poster } : item
     })
   } catch (e) { handleError(e) }
+  // 首页海报行的数据预取：只在点播分类从未加载过时拉一次（复用点播页自己
+  // 的加载逻辑，不新增取数路径）；源站连不上时不把错误顶到首页——分类页
+  // 自己会再报错，进首页不打扰。
+  if (!vodCategories.value.length && !vodCategoryLoading.value) {
+    const previousError = errMsg.value
+    await refreshVod()
+    if (!vodCategories.value.length) errMsg.value = previousError
+  }
+  // 我的片单行取真实收藏：本地库查询，失败时 loadVodFavorites 自己报错。
+  await loadVodFavorites()
 }
 
 async function loadLibrary() {
@@ -1916,28 +2003,32 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="container" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
-    <aside class="sidebar">
-      <div class="brand">
+  <main class="container">
+    <header class="topnav" :class="{ solid: mode !== 'home' || navScrolled }">
+      <div class="logo" :title="platform + ' · 播放器' + (playerReady ? '就绪' : '未就绪')" @click="switchMode('home')">
         <img class="brand-logo" src="/appicon.png" alt="UnBox" />
-        <span class="brand-name">UnBox</span>
-        <button class="sidebar-toggle" type="button" :title="sidebarCollapsed ? '展开导航' : '收起导航'" @click="sidebarCollapsed = !sidebarCollapsed">{{ sidebarCollapsed ? '»' : '«' }}</button>
+        <span class="logo-text">UNBOX</span>
       </div>
 
-      <nav class="tabs">
-        <button :class="{ active: mode === 'home' }" @click="switchMode('home')"><span class="nav-icon">首</span><span class="nav-label">首页</span></button>
-        <button :class="{ active: mode === 'vod' }" @click="switchMode('vod')"><span class="nav-icon">点</span><span class="nav-label">点播</span></button>
-        <button :class="{ active: mode === 'live' }" @click="switchMode('live')"><span class="nav-icon">直</span><span class="nav-label">直播</span></button>
-        <button :class="{ active: mode === 'library' }" @click="switchMode('library')"><span class="nav-icon">媒</span><span class="nav-label">媒体库</span></button>
-        <button :class="{ active: mode === 'search' }" @click="switchMode('search')"><span class="nav-icon">搜</span><span class="nav-label">搜索</span></button>
-        <button :class="{ active: mode === 'favorites' }" @click="switchMode('favorites')"><span class="nav-icon">收</span><span class="nav-label">收藏</span></button>
-        <button class="settings-btn" :class="{ active: mode === 'settings' }" @click="switchMode('settings')"><span class="nav-icon">设</span><span class="nav-label">设置</span></button>
+      <nav class="nav-links" aria-label="主导航">
+        <button :class="{ active: navActive === 'home' }" @click="switchMode('home')">首页</button>
+        <button :class="{ active: navActive === 'movies' }" @click="goVodCategoryByTitle('电影')">电影</button>
+        <button :class="{ active: navActive === 'tv' }" @click="goVodCategoryByTitle('电视剧', '连续剧', '剧集')">电视剧</button>
+        <button :class="{ active: navActive === 'live' }" @click="switchMode('live')">直播</button>
+        <button :class="{ active: navActive === 'favorites' }" @click="switchMode('favorites')">我的片单</button>
+        <button :class="{ active: navActive === 'library' }" @click="switchMode('library')">媒体库</button>
       </nav>
 
-      <div class="sidebar-foot">
-        <span class="sidebar-status">{{ platform }} · 播放器{{ playerReady ? '就绪' : '未就绪' }}</span>
+      <div class="nav-tools">
+        <button class="icon-btn" type="button" aria-label="搜索" title="搜索" @click="switchMode('search')">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z" /></svg>
+        </button>
+        <button class="icon-btn" type="button" aria-label="设置" title="设置" @click="switchMode('settings')">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94a7.07 7.07 0 0 0 0-1.88l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.59-.22l-2.39.96a7.3 7.3 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.3 7.3 0 0 0-1.62.94l-2.39-.96a.5.5 0 0 0-.59.22L2.65 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.07 7.07 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.42.34.59.22l2.39-.96c.49.38 1.03.7 1.62.94l.36 2.54c.05.24.25.42.5.42h3.84c.25 0 .45-.18.5-.42l.36-2.54a7.3 7.3 0 0 0 1.62-.94l2.39.96c.22.1.45 0 .59-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.6A3.6 3.6 0 1 1 15.6 12 3.6 3.6 0 0 1 12 15.6z" /></svg>
+        </button>
+        <button class="avatar" type="button" title="设置" aria-label="设置" @click="switchMode('settings')">N</button>
       </div>
-    </aside>
+    </header>
 
     <div class="app-main">
     <div v-if="showMpvInstallPrompt" class="mpv-install" aria-live="polite">
@@ -1947,24 +2038,23 @@ onBeforeUnmount(() => {
       <p v-if="installMessage" class="install-cmd">{{ installMessage }}</p>
     </div>
 
-    <!-- 首页：焦点 Hero + 分类快捷入口 + 继续观看 -->
-    <section v-if="mode === 'home'" class="home">
+    <!-- 首页：全幅横幅 + 横向海报行（全部来自真实数据） -->
+    <section v-if="mode === 'home'" class="home" @scroll="onHomeScroll">
       <div v-if="heroItem" class="home-hero">
         <div class="home-hero-bg" aria-hidden="true">
           <img v-if="heroItem.VodLogo" :src="heroItem.VodLogo" alt="" @error="imgError" />
           <span v-else class="home-hero-fallback" :style="{ background: posterGradient(heroItem.VodTitle) }"></span>
         </div>
         <div class="home-hero-body">
-          <span class="home-hero-poster">
-            <img v-if="heroItem.VodLogo" :src="heroItem.VodLogo" alt="" @error="imgError" />
-            <span v-else class="content-card-fallback" :style="{ background: posterGradient(heroItem.VodTitle) }" aria-hidden="true">{{ heroItem.VodTitle.slice(0, 1) }}</span>
-          </span>
           <div class="home-hero-info">
             <p class="home-hero-kicker">继续观看</p>
             <h2>{{ heroItem.VodTitle }}</h2>
             <p v-if="homeCardItems[0]" class="home-hero-meta">{{ contentCardSubtitle(homeCardItems[0]) }}</p>
             <div v-if="heroItem.Duration" class="home-hero-progress"><span :style="{ width: (heroProgress * 100) + '%' }"></span></div>
-            <button class="home-hero-play" type="button" @click="resumeVod(heroItem)">▶ 继续播放{{ heroItem.EpName ? ' ' + heroItem.EpName : '' }}</button>
+            <div class="home-hero-actions">
+              <button class="home-hero-play" type="button" @click="resumeVod(heroItem)">▶ 继续播放{{ heroItem.EpName ? ' ' + heroItem.EpName : '' }}</button>
+              <button class="home-hero-more" type="button" @click="openHeroDetail">更多信息</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1974,20 +2064,73 @@ onBeforeUnmount(() => {
         <button v-for="c in vodCategories" :key="c.ID" type="button" class="home-cat-chip" @click="goVodCategory(c.ID)">{{ c.Title }}</button>
       </div>
 
-      <h2>观看记录</h2>
-      <p v-if="!homeHistory.length" class="home-empty">暂无观看记录，去「点播」看看吧</p>
-      <ContentCardList
-        v-else
-        list-class="home-list home-continue"
-        :items="homeCardItems"
-        :style="contentCardStyle"
-        deletable
-        :active-delete-key="activeDeleteKey"
-        @select="(i) => resumeVod(homeHistory[i])"
-        @contextmenu="(i, event) => openCardContextMenu('history', homeHistory[i], event)"
-        @remove="(i) => deleteHomeHistory(homeHistory[i])"
-        @request-delete="requestDeleteContextCard"
-      />
+      <div class="home-rows">
+        <section v-if="homeHistory.length" class="netflix-row-section">
+          <h2>继续观看 <span class="chev">›</span></h2>
+          <div class="netflix-row-wrap">
+            <button class="netflix-row-arrow prev" type="button" aria-label="向左滚动" @click="scrollRow($event, -1)">‹</button>
+            <ContentCardList
+              list-class="home-list home-continue netflix-row netflix-row-wide"
+              :items="homeCardItems"
+              :style="'grid'"
+              deletable
+              :active-delete-key="activeDeleteKey"
+              @select="(i) => resumeVod(homeHistory[i])"
+              @contextmenu="(i, event) => openCardContextMenu('history', homeHistory[i], event)"
+              @remove="(i) => deleteHomeHistory(homeHistory[i])"
+              @request-delete="requestDeleteContextCard"
+            />
+            <button class="netflix-row-arrow next" type="button" aria-label="向右滚动" @click="scrollRow($event, 1)">›</button>
+          </div>
+        </section>
+
+        <section v-if="featuredRowItems.length" class="netflix-row-section">
+          <h2>为你精选 <span class="chev">›</span></h2>
+          <div class="netflix-row-wrap">
+            <button class="netflix-row-arrow prev" type="button" aria-label="向左滚动" @click="scrollRow($event, -1)">‹</button>
+            <ContentCardList
+              list-class="netflix-row"
+              :items="featuredRowItems"
+              :style="'grid'"
+              @select="(i) => openVodDetail(visibleVodItems[i])"
+            />
+            <button class="netflix-row-arrow next" type="button" aria-label="向右滚动" @click="scrollRow($event, 1)">›</button>
+          </div>
+        </section>
+
+        <section v-if="top10Items.length" class="netflix-row-section">
+          <h2>{{ activeVodCatObj?.Title ? activeVodCatObj.Title + ' ' : '' }}Top 10 <span class="chev">›</span></h2>
+          <div class="netflix-row-wrap">
+            <button class="netflix-row-arrow prev" type="button" aria-label="向左滚动" @click="scrollRow($event, -1)">‹</button>
+            <div class="netflix-top10">
+              <button v-for="(item, index) in top10Items" :key="item.ID + (item.Site || '')" type="button" class="top10-item" :aria-label="'第 ' + (index + 1) + ' 名《' + item.Title + '》'" @click="openVodDetail(item)">
+                <span class="top10-num" aria-hidden="true">{{ index + 1 }}</span>
+                <span class="top10-poster">
+                  <img v-if="item.Logo" :src="item.Logo" alt="" loading="lazy" referrerpolicy="no-referrer" @error="imgError" />
+                  <span v-else class="content-card-fallback" :style="{ background: posterGradient(item.Title) }" aria-hidden="true">{{ item.Title.slice(0, 1) }}</span>
+                </span>
+              </button>
+            </div>
+            <button class="netflix-row-arrow next" type="button" aria-label="向右滚动" @click="scrollRow($event, 1)">›</button>
+          </div>
+        </section>
+
+        <section v-if="favoriteRowItems.length" class="netflix-row-section">
+          <h2>我的片单 <span class="chev">›</span></h2>
+          <div class="netflix-row-wrap">
+            <button class="netflix-row-arrow prev" type="button" aria-label="向左滚动" @click="scrollRow($event, -1)">‹</button>
+            <ContentCardList
+              list-class="netflix-row"
+              :items="favoriteRowItems"
+              :style="'grid'"
+              @select="(i) => openVodFavorite(vodFavorites[i])"
+            />
+            <button class="netflix-row-arrow next" type="button" aria-label="向右滚动" @click="scrollRow($event, 1)">›</button>
+          </div>
+        </section>
+
+        <p v-if="!homeHistory.length && !vodCardItems.length && !vodFavorites.length" class="home-empty">暂无观看记录，去「点播」看看吧</p>
+      </div>
     </section>
 
     <!-- 点播搜索 -->
@@ -2022,6 +2165,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <p v-if="showVodNoResults" class="home-empty">暂无搜索结果</p>
+      <p v-if="completedSearchQuery && !searching && vodSearchItems.length" class="search-count">找到 {{ vodSearchItems.length }} 条结果</p>
       <section class="vod-main search-results">
         <ContentCardList
           ref="searchListRef"
@@ -2163,8 +2307,7 @@ onBeforeUnmount(() => {
         </aside>
 
         <section class="vod-main">
-          <VodDetailHeader v-if="vodView === 'detail'" :now-playing="vodNowPlaying" @back="backFromVodDetail" />
-          <template v-if="vodView !== 'detail'">
+          <template>
           <ContentCardList
             ref="vodListRef"
             :items="vodCardItems"
@@ -2189,53 +2332,6 @@ onBeforeUnmount(() => {
             </div>
           </div>
           </template>
-          <div v-else-if="vodView === 'detail' && vodDetail" class="vod-detail">
-            <div class="vod-detail-hero">
-              <div class="vod-hero-bg" aria-hidden="true">
-                <img v-if="vodDetail.Logo" :src="vodDetail.Logo" alt="" @error="imgError" />
-              </div>
-              <div class="vod-hero-body">
-                <span class="vod-hero-poster">
-                  <img v-if="vodDetail.Logo" :src="vodDetail.Logo" class="poster" referrerpolicy="no-referrer" @error="imgError" />
-                  <span v-else class="content-card-fallback" :style="{ background: posterGradient(vodDetail.Title) }" aria-hidden="true">{{ vodDetail.Title.slice(0, 1) }}</span>
-                </span>
-                <div class="vod-hero-info">
-                  <h2>{{ vodDetail.Title }}</h2>
-                  <p v-if="vodDetail.Type || vodDetail.Year || vodDetail.Area" class="meta">{{ [vodDetail.Type, vodDetail.Year, vodDetail.Area].filter(Boolean).join(' · ') }}</p>
-                  <p v-if="vodDetail.Remarks" class="vod-hero-remarks">{{ vodDetail.Remarks }}</p>
-                  <button class="favorite-toggle" type="button" :aria-pressed="vodFavorited" @click="toggleVodFavorite">{{ vodFavorited ? '取消收藏' : '收藏' }}</button>
-                  <div class="desc" :class="{ expanded: descExpanded }" v-html="vodDetail.Description"></div>
-                  <button v-if="vodDetail.Description" class="desc-toggle" type="button" @click="descExpanded = !descExpanded">{{ descExpanded ? '收起简介' : '展开简介' }}</button>
-                </div>
-              </div>
-            </div>
-            <div class="vod-detail-main">
-              <div class="vod-player">
-                <p v-if="vodPlaybackStatus === 'error'" class="playback-error" aria-live="assertive">剧集播放失败：{{ vodPlaybackError }}</p>
-                <PlaybackView :plan="vodPagePlaybackPlan" :seek-to="pendingSeek" :loading="vodPlayerLoading" :skip-marks="vodSkipMarks" @mark-intro="(p) => markSkipAt('intro', p)" @mark-outro="(p) => markSkipAt('outro', p)" @reset-intro="resetSkipMark('intro')" @reset-outro="resetSkipMark('outro')" :suppress-fallback="playbackSettings.AutoSwitchSource" @fallback="(id, position) => fallbackToMpv('vod', id, vodPlaybackToken, position)" @playback="(state, message) => onVodPlaybackSignal(vodPlaybackToken, state, message)" @progress="(time, duration) => onVodProgress(vodPlaybackToken, time, duration)" />
-                <PreloadView :plan="preloadPlan" />
-                <div v-if="vodSkipNotice" class="skip-notice">{{ vodSkipNotice }}</div>
-              </div>
-              <aside class="vod-episodes">
-                <div v-if="(vodDetail.Sources ?? []).length" class="ep-src-tabs">
-                  <button v-for="src in vodDetail.Sources" :key="src" :class="{ active: src === activeSource }" @click="selectEpisodeSource(src)">{{ src }}</button>
-                </div>
-                <div v-if="episodeRanges.length > 1" class="ep-pagination-wrap" role="navigation" aria-label="剧集分页">
-                  <button class="ep-pagination-arrow" type="button" aria-label="向左滚动剧集分页" title="向左滚动" @click="scrollEpisodePages(-1)">‹</button>
-                  <div ref="episodePagination" class="ep-pagination">
-                    <button v-for="(range, index) in episodeRanges" :key="range.start" type="button"
-                            :class="{ active: index === episodePage }" :aria-current="index === episodePage ? 'page' : undefined"
-                            @click="selectEpisodePage(index)">{{ range.start }}~{{ range.end }}集</button>
-                  </div>
-                  <button class="ep-pagination-arrow" type="button" aria-label="向右滚动剧集分页" title="向右滚动" @click="scrollEpisodePages(1)">›</button>
-                </div>
-                <div class="ep-list">
-                  <button v-for="ep in visibleEpisodes" :key="ep.ID" :class="{ active: ep.ID === currentEpisodeID }"
-                          @click="playEpisode(ep)">{{ ep.Name }}</button>
-                </div>
-              </aside>
-            </div>
-          </div>
         </section>
       </div>
 
@@ -2243,6 +2339,7 @@ onBeforeUnmount(() => {
 
     <!-- 设置 -->
     <section v-if="mode === 'settings'" class="settings-page">
+      <h2 class="settings-title">设置</h2>
       <p v-if="importProgress && importProgress.Stage !== 'live'" class="progress">{{ importProgress.Message }}</p>
       <p v-if="importSummary" class="ok">{{ importSummary }}</p>
 
@@ -2351,6 +2448,69 @@ onBeforeUnmount(() => {
         </div>
       </section>
     </section>
+    </div>
+
+    <!-- 点播详情弹窗：海报大图 + 简介 + 播放器 + 剧集 + 更多类似内容 -->
+    <div v-if="mode === 'vod' && vodView === 'detail' && vodDetail" class="vod-detail-overlay" @click.self="backFromVodDetail">
+      <div class="vod-detail-modal" role="dialog" aria-modal="true" aria-label="影片详情">
+        <VodDetailHeader :now-playing="vodNowPlaying" @back="backFromVodDetail" />
+        <div class="vod-detail">
+            <div class="vod-detail-hero">
+              <div class="vod-hero-bg" aria-hidden="true">
+                <img v-if="vodDetail.Logo" :src="vodDetail.Logo" alt="" @error="imgError" />
+              </div>
+              <div class="vod-hero-body">
+                <span class="vod-hero-poster">
+                  <img v-if="vodDetail.Logo" :src="vodDetail.Logo" class="poster" referrerpolicy="no-referrer" @error="imgError" />
+                  <span v-else class="content-card-fallback" :style="{ background: posterGradient(vodDetail.Title) }" aria-hidden="true">{{ vodDetail.Title.slice(0, 1) }}</span>
+                </span>
+                <div class="vod-hero-info">
+                  <h2>{{ vodDetail.Title }}</h2>
+                  <p v-if="vodDetail.Type || vodDetail.Year || vodDetail.Area" class="meta">{{ [vodDetail.Type, vodDetail.Year, vodDetail.Area].filter(Boolean).join(' · ') }}</p>
+                  <p v-if="vodDetail.Remarks" class="vod-hero-remarks">{{ vodDetail.Remarks }}</p>
+                  <button class="favorite-toggle" type="button" :aria-pressed="vodFavorited" @click="toggleVodFavorite">{{ vodFavorited ? '取消收藏' : '收藏' }}</button>
+                  <div class="desc" :class="{ expanded: descExpanded }" v-html="vodDetail.Description"></div>
+                  <button v-if="vodDetail.Description" class="desc-toggle" type="button" @click="descExpanded = !descExpanded">{{ descExpanded ? '收起简介' : '展开简介' }}</button>
+                </div>
+              </div>
+            </div>
+            <div class="vod-detail-main">
+              <div class="vod-player">
+                <p v-if="vodPlaybackStatus === 'error'" class="playback-error" aria-live="assertive">剧集播放失败：{{ vodPlaybackError }}</p>
+                <PlaybackView :plan="vodPagePlaybackPlan" :seek-to="pendingSeek" :loading="vodPlayerLoading" :skip-marks="vodSkipMarks" @mark-intro="(p) => markSkipAt('intro', p)" @mark-outro="(p) => markSkipAt('outro', p)" @reset-intro="resetSkipMark('intro')" @reset-outro="resetSkipMark('outro')" :suppress-fallback="playbackSettings.AutoSwitchSource" @fallback="(id, position) => fallbackToMpv('vod', id, vodPlaybackToken, position)" @playback="(state, message) => onVodPlaybackSignal(vodPlaybackToken, state, message)" @progress="(time, duration) => onVodProgress(vodPlaybackToken, time, duration)" />
+                <PreloadView :plan="preloadPlan" />
+                <div v-if="vodSkipNotice" class="skip-notice">{{ vodSkipNotice }}</div>
+              </div>
+              <aside class="vod-episodes">
+                <div v-if="(vodDetail.Sources ?? []).length" class="ep-src-tabs">
+                  <button v-for="src in vodDetail.Sources" :key="src" :class="{ active: src === activeSource }" @click="selectEpisodeSource(src)">{{ src }}</button>
+                </div>
+                <div v-if="episodeRanges.length > 1" class="ep-pagination-wrap" role="navigation" aria-label="剧集分页">
+                  <button class="ep-pagination-arrow" type="button" aria-label="向左滚动剧集分页" title="向左滚动" @click="scrollEpisodePages(-1)">‹</button>
+                  <div ref="episodePagination" class="ep-pagination">
+                    <button v-for="(range, index) in episodeRanges" :key="range.start" type="button"
+                            :class="{ active: index === episodePage }" :aria-current="index === episodePage ? 'page' : undefined"
+                            @click="selectEpisodePage(index)">{{ range.start }}~{{ range.end }}集</button>
+                  </div>
+                  <button class="ep-pagination-arrow" type="button" aria-label="向右滚动剧集分页" title="向右滚动" @click="scrollEpisodePages(1)">›</button>
+                </div>
+                <div class="ep-list">
+                  <button v-for="ep in visibleEpisodes" :key="ep.ID" :class="{ active: ep.ID === currentEpisodeID }"
+                          @click="playEpisode(ep)">{{ ep.Name }}</button>
+                </div>
+              </aside>
+            </div>
+          </div>
+        <section v-if="similarItems.length" class="vod-similar">
+          <h3>更多类似内容</h3>
+          <ContentCardList
+            list-class="netflix-row"
+            :items="similarItems"
+            :style="'grid'"
+            @select="(i) => openSimilarVodDetail(similarSourceItems[i])"
+          />
+        </section>
+      </div>
     </div>
 
     <div v-if="showThreads" class="settings-overlay" @click.self="showThreads = false">
@@ -2493,7 +2653,7 @@ onBeforeUnmount(() => {
           <h2>内容展示样式</h2>
           <button type="button" aria-label="关闭" @click="showContentCardStyle = false">✕</button>
         </div>
-        <p class="settings-choice-hint">控制点播、首页记录和收藏页的内容展示方式</p>
+        <p class="settings-choice-hint">控制点播列表、搜索结果和收藏页的内容展示方式（首页海报行固定为卡片）</p>
         <div class="settings-choice-options">
           <button v-for="style in contentCardStyleOptions" :key="style.value" type="button" :class="{ active: contentCardStyle === style.value }" @click="applyContentCardStyle(style.value)">{{ style.label }}</button>
         </div>
