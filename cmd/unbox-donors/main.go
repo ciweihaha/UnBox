@@ -241,10 +241,10 @@ func run(ctx context.Context, stdout, stderr io.Writer, client *http.Client, now
 	userID := strings.TrimSpace(os.Getenv("AFDIAN_USER_ID"))
 	token := strings.TrimSpace(os.Getenv("AFDIAN_TOKEN"))
 	if userID == "" {
-		return reportError(stderr, errors.New("缺少环境变量 AFDIAN_USER_ID"))
+		return reportError(stderr, errors.New("缺少环境变量 AFDIAN_USER_ID：请在仓库 Settings → Secrets and variables → Actions 添加名为 AFDIAN_USER_ID 的 Secret，值为爱发电开发者后台（https://afdian.com/dashboard/dev）显示的 user_id"))
 	}
 	if token == "" {
-		return reportError(stderr, errors.New("缺少环境变量 AFDIAN_TOKEN"))
+		return reportError(stderr, errors.New("缺少环境变量 AFDIAN_TOKEN：请在仓库 Settings → Secrets and variables → Actions 添加名为 AFDIAN_TOKEN 的 Secret，值为爱发电开发者后台（https://afdian.com/dashboard/dev）页面底部生成的 API Token"))
 	}
 
 	sponsors, err := fetchAllSponsors(ctx, client, afdianQuerySponsorURL, token, userID)
