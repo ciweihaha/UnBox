@@ -2,6 +2,9 @@
 #
 # 凭据只从 Actions Secrets 注入，不会写入仓库或日志：
 #   AFDIAN_USER_ID / AFDIAN_TOKEN
+#   两项均取自爱发电开发者后台 https://afdian.com/dashboard/dev
+#   （该页显示的 user_id 与页面底部生成的 API Token）；缺失时任务会失败，
+#   导出程序会在日志里提示补 Secret 的位置。
 
 name: donors
 
