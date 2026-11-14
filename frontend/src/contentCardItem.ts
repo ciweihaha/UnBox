@@ -31,6 +31,18 @@ export function contentCardSubtitle(item: ContentCardItem): string {
 }
 
 /**
+ * posterGradient 无海报时的渐变封面：按标题算出稳定色相，同一标题永远同一配色，
+ * 不同标题尽量散开。两段深色渐变保证浅色主题下也有足够对比，封面上的首字符
+ * 与标题文字始终可读。
+ */
+export function posterGradient(title: string): string {
+  let hash = 0
+  for (const ch of title) hash = (hash * 31 + ch.codePointAt(0)!) >>> 0
+  const hue = hash % 360
+  return `linear-gradient(135deg, hsl(${hue} 45% 32%) 0%, hsl(${(hue + 40) % 360} 55% 22%) 100%)`
+}
+
+/**
  * historyCardItem 归一「首页观看记录」。
  *
  * 单独拎出来是因为它的 site / detail / progress 三者必须保持一致：列表第二行是
