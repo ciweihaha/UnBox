@@ -1,12 +1,4 @@
 {
-  "updatedAt": "2026-11-08T21:45:08Z",
-  "donors": [
-    {
-      "id": "51c743def9c011ef830a52540025c377",
-      "name": "1201net",
-      "avatar": "https://pic1.afdiancdn.com/default/avatar/avatar-blue.png",
-      "amount": 5,
-      "anonymous": false
-    }
-  ]
+  "updatedAt": "2026-11-14T07:09:02Z",
+  "donors": []
 }
