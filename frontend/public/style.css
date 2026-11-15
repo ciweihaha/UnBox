@@ -2153,10 +2153,14 @@ body {
   transform: translateY(-2px);
 }
 
-/* 海报框定高：2:3 由它承担，标题在框外正常排布。 */
+/* 海报框定高：2:3 由它承担，标题在框外正常排布。width: 100% 必须有：
+   海报框是卡片纵向 flex 容器里的子项，里面全是绝对定位的子元素（img /
+   渐变封面），内容高度为 0；没有确定宽度时 aspect-ratio 会按 0 高度反推
+   宽度，海报框塌成 2×3px（只剩边框），整行卡片看起来就只剩纯文字。 */
 .content-card-poster {
   position: relative;
   display: block;
+  width: 100%;
   aspect-ratio: 2 / 3;
   overflow: clip;
   background: var(--row-alt);
