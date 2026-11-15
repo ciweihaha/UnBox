@@ -540,6 +540,22 @@ const searchStrongCount = computed(() => countLeadingStrong(vodSearchItems.value
 
 // 当前激活分类的筛选组与入口显隐：有非空筛选项才显示筛选按钮。
 const activeVodCatObj = computed(() => vodCategories.value.find(c => c.ID === vodActiveCat.value))
+
+// 首页分类栏只留电影 / 电视剧 / 动漫 / 综艺四项（第 6 项）：分类是源站
+// 下发的（vodCategories），各源命名不一（电影片、连续剧、剧集、动画……），
+// 按名包含匹配；每组只取第一个命中的分类，避免同一类出两颗芯片。
+// 点播页自己的类目栏（.cats-list）仍用全量 vodCategories，不动。
+const homeMainCatGroups = [
+  ['电影'],
+  ['电视剧', '连续剧', '剧集'],
+  ['动漫', '动画'],
+  ['综艺'],
+]
+const homeMainCats = computed(() =>
+  homeMainCatGroups
+    .map(names => vodCategories.value.find(c => names.some(n => (c.Title ?? '').includes(n))))
+    .filter((c): c is Section => !!c),
+)
 const vodFilterGroups = computed(() => availableFilterGroups(activeVodCatObj.value))
 
 async function refresh() {
@@ -2126,9 +2142,9 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div v-if="vodCategories.length" class="home-cats">
+      <div v-if="homeMainCats.length" class="home-cats">
         <span class="home-cats-title">分类</span>
-        <button v-for="c in vodCategories" :key="c.ID" type="button" class="home-cat-chip" @click="goVodCategory(c.ID)">{{ c.Title }}</button>
+        <button v-for="c in homeMainCats" :key="c.ID" type="button" class="home-cat-chip" @click="goVodCategory(c.ID)">{{ c.Title }}</button>
       </div>
 
       <div class="home-rows">
