@@ -425,11 +425,6 @@ const heroProgress = computed(() => {
 const heroLogoFailed = ref(false)
 watch(heroItem, () => { heroLogoFailed.value = false })
 
-const top10FailedLogos = ref(new Set<string>())
-function onTop10PosterError(item: VodItem) {
-  top10FailedLogos.value = new Set(top10FailedLogos.value).add(item.ID + (item.Site || ''))
-}
-
 const detailLogoFailed = ref(false)
 watch(vodDetail, () => { detailLogoFailed.value = false })
 
@@ -456,11 +451,10 @@ const navActive = computed(() => {
 
 // 首页海报行只取点播列表（vodListItems），不用 visibleVodItems：
 // 用户刚搜完回首页时 visibleVodItems 是搜索结果，行会错显示搜索结果。
-// 为你精选取第 11–20 条，与 Top 10（前 10 条）错开——原来两行是同一份
-// 前 10 条，贴在一起像重复。列表不足 10 条时精选行不渲染。
+// 为你精选取前 10 条（Top 10 行已删，不再需要与它错开取 11–20 条）。
+// 列表不足 10 条时有多少显示多少。
 const homeListCardItems = computed<ContentCardItem[]>(() => vodListItems.value.map(vodCardItem))
-const featuredRowItems = computed(() => homeListCardItems.value.slice(10, 20))
-const top10Items = computed(() => vodListItems.value.slice(0, 10))
+const featuredRowItems = computed(() => homeListCardItems.value.slice(0, 10))
 const favoriteRowItems = computed(() => favoriteCardItems.value.slice(0, 10))
 
 // 详情弹窗里的「更多类似内容」：与当前详情同一份真实列表（搜索进来用搜索
@@ -512,7 +506,7 @@ async function openSimilarVodDetail(item: VodItem) {
 // 横向海报行的左右箭头：按轨道可视宽度的 85% 平滑滚动。
 function scrollRow(event: MouseEvent, direction: number) {
   const wrap = (event.currentTarget as HTMLElement).parentElement
-  const track = wrap?.querySelector('ul, .netflix-top10')
+  const track = wrap?.querySelector('ul')
   if (!track) return
   track.scrollBy({ left: direction * track.clientWidth * 0.85, behavior: 'smooth' })
 }
@@ -2165,25 +2159,8 @@ onBeforeUnmount(() => {
               list-class="netflix-row"
               :items="featuredRowItems"
               :style="'grid'"
-              @select="(i) => openVodDetail(vodListItems[i + 10])"
+              @select="(i) => openVodDetail(vodListItems[i])"
             />
-            <button class="netflix-row-arrow next" type="button" aria-label="向右滚动" @click="scrollRow($event, 1)">›</button>
-          </div>
-        </section>
-
-        <section v-if="top10Items.length" class="netflix-row-section">
-          <h2>{{ activeVodCatObj?.Title ? activeVodCatObj.Title + ' ' : '' }}Top 10 <span class="chev">›</span></h2>
-          <div class="netflix-row-wrap">
-            <button class="netflix-row-arrow prev" type="button" aria-label="向左滚动" @click="scrollRow($event, -1)">‹</button>
-            <div class="netflix-top10">
-              <button v-for="(item, index) in top10Items" :key="item.ID + (item.Site || '')" type="button" class="top10-item" :aria-label="'第 ' + (index + 1) + ' 名《' + item.Title + '》'" @click="openVodDetail(item)">
-                <span class="top10-num" aria-hidden="true">{{ index + 1 }}</span>
-                <span class="top10-poster">
-                  <img v-if="item.Logo && !top10FailedLogos.has(item.ID + (item.Site || ''))" :src="item.Logo" alt="" loading="lazy" referrerpolicy="no-referrer" @error="onTop10PosterError(item)" />
-                  <span v-else class="content-card-fallback" :style="{ background: posterGradient(item.Title) }" aria-hidden="true">{{ item.Title.slice(0, 1) }}</span>
-                </span>
-              </button>
-            </div>
             <button class="netflix-row-arrow next" type="button" aria-label="向右滚动" @click="scrollRow($event, 1)">›</button>
           </div>
         </section>

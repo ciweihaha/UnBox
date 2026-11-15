@@ -6,11 +6,11 @@ const stylesheet = readFileSync('public/style.css', 'utf8')
 const app = readFileSync('src/App.vue', 'utf8')
 const cardList = readFileSync('src/components/ContentCardList.vue', 'utf8')
 
-// 首页「为你精选」行（模板里的 <h2>为你精选 到 Top 10 行标题之间）。
+// 首页「为你精选」行（模板里的 <h2>为你精选 到下一行「我的片单」之间）。
 const featuredStart = app.indexOf('<h2>为你精选')
 const featuredSection = app.slice(
   featuredStart,
-  app.indexOf('Top 10 <span', featuredStart),
+  app.indexOf('我的片单', featuredStart),
 )
 
 // 首页「为你精选」改海报卡片（第 4 项）：用户截图里 9 个片名只有文字，
@@ -33,7 +33,7 @@ describe('vod featured row redesign', () => {
   })
 
   it('feeds the featured row from the logo-carrying card items', () => {
-    expect(app).toMatch(/featuredRowItems\s*=\s*computed\(\(\) => homeListCardItems\.value\.slice\(10,\s*20\)\)/)
+    expect(app).toMatch(/featuredRowItems\s*=\s*computed\(\(\) => homeListCardItems\.value\.slice\(0,\s*10\)\)/)
     expect(app).toMatch(/homeListCardItems\s*=\s*computed<ContentCardItem\[\]>\(\(\) => vodListItems\.value\.map\(vodCardItem\)\)/)
     expect(cardList).toContain('content-card-fallback')
   })

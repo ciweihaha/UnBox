@@ -2013,63 +2013,6 @@ body {
   background: #e50914;
 }
 
-/* Top 10 行：描边大数字 + 海报，数字取当前列表的真实前 10 名次。 */
-.netflix-top10 {
-  display: flex;
-  gap: 0.5rem;
-  padding: 0.4rem 4% 0.9rem;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-}
-
-.netflix-top10::-webkit-scrollbar {
-  display: none;
-}
-
-.top10-item {
-  display: flex;
-  flex: none;
-  align-items: flex-end;
-  padding: 0;
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-
-.top10-num {
-  font-family: "Arial Black", Arial, sans-serif;
-  font-size: 10rem;
-  font-weight: 900;
-  line-height: 0.78;
-  letter-spacing: -0.9rem;
-  margin-right: -1rem;
-  color: #141414;
-  -webkit-text-stroke: 4px #595959;
-  user-select: none;
-}
-
-.top10-item:hover .top10-num {
-  -webkit-text-stroke-color: #8a8a8a;
-}
-
-.top10-poster {
-  position: relative;
-  z-index: 1;
-  width: 132px;
-  aspect-ratio: 2 / 3;
-  overflow: clip;
-  border-radius: 8px;
-}
-
-.top10-poster img,
-.top10-poster .content-card-fallback {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
 .favorites-page { flex: 1; min-height: 0; overflow-y: auto; padding: calc(var(--nav-h) + 1rem) 4% 2rem; }
 .favorites-page h2 { margin: 0.25rem 0 0.75rem; }
 .favorites-list { margin: 0; padding: 0; list-style: none; }

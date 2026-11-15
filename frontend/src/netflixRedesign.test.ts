@@ -99,11 +99,6 @@ describe('poster row contract', () => {
     expect(stylesheet).toMatch(/\.content-card-progressbar i\s*\{[^}]*background:\s*#e50914;/s)
   })
 
-  it('renders a top-10 row with outlined numbers from the real list', () => {
-    expect(app).toContain('netflix-top10')
-    expect(app).toContain('Top 10')
-    expect(stylesheet).toMatch(/\.top10-num\s*\{[^}]*-webkit-text-stroke:/s)
-  })
 })
 
 describe('detail modal contract', () => {
@@ -147,15 +142,18 @@ describe('home rows contract', () => {
   it('sources home rows from the vod list, never from search results', () => {
     // 搜完回首页时 visibleVodItems 是搜索结果；行必须只取 vodListItems。
     expect(app).toMatch(/homeListCardItems\s*=\s*computed[^\n]*vodListItems\.value\.map\(vodCardItem\)/)
-    expect(app).toMatch(/top10Items\s*=\s*computed\([^\n]*vodListItems\.value\.slice\(0,\s*10\)/)
     expect(app).not.toMatch(/featuredRowItems\s*=\s*computed\([^\n]*visibleVodItems/)
-    expect(app).not.toMatch(/top10Items\s*=\s*computed\([^\n]*visibleVodItems/)
   })
 
-  it('does not show the same ten items in both home rows', () => {
-    // Top 10 取前 10 条，为你精选取第 11–20 条；点选精选行按 i + 10 取回原条目。
-    expect(app).toMatch(/featuredRowItems\s*=\s*computed\([^\n]*slice\(10,\s*20\)/)
-    expect(app).toContain('openVodDetail(vodListItems[i + 10])')
+  it('has no Top 10 row: featured takes the first ten items', () => {
+    // Top 10 行已删（第 5 项）；为你精选不再需要与它错开，取前 10 条，点选按 i 取回原条目。
+    expect(app).not.toContain('top10Items')
+    expect(app).not.toContain('netflix-top10')
+    expect(app).not.toContain('top10FailedLogos')
+    expect(stylesheet).not.toContain('netflix-top10')
+    expect(stylesheet).not.toContain('.top10-')
+    expect(app).toMatch(/featuredRowItems\s*=\s*computed\([^\n]*slice\(0,\s*10\)/)
+    expect(app).toContain('openVodDetail(vodListItems[i])')
   })
 })
 
@@ -164,8 +162,6 @@ describe('poster fallback contract', () => {
     // imgError 只隐藏坏图；失败状态必须让 v-else 的渐变封面渲染出来。
     expect(app).toContain('heroLogoFailed')
     expect(app).toMatch(/heroItem\.VodLogo && !heroLogoFailed/)
-    expect(app).toContain('top10FailedLogos')
-    expect(app).toMatch(/item\.Logo && !top10FailedLogos\.has\(/)
     expect(app).toContain('detailLogoFailed')
     expect(app).toMatch(/vodDetail\.Logo && !detailLogoFailed/)
     expect(cardList).toContain('failedLogos')
