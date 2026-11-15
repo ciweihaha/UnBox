@@ -14,6 +14,8 @@ import { contentCardStyleLabel, contentCardStyleOptions, normalizeContentCardSty
 import { contentCardSubtitle, historyCardItem, posterGradient, type ContentCardItem } from './contentCardItem'
 import { imgError, scrollxEnter, scrollxLeave } from './contentListDom'
 import { createPlaybackSettings, PLAYBACK_SETTING_ITEMS, type PlaybackSettingKey, type PlaybackSettingsApi } from './playbackSettings'
+import { createSubtitleTranslator, type TranslateSubtitleApi } from './subtitleTranslate'
+import { createTranslateSettings, type TranslateSettingsApi } from './translateSettings'
 import { VodAutomation, nextEpisodeInSource, sameNameEpisodeOnSource, type VodAutomationHost } from './playbackAutomation'
 import { resolveSkipAction, type SkipRuntime, type VodSkipMarks } from './vodSkip'
 import { initializeHomeState } from './startup'
@@ -266,6 +268,35 @@ const playbackSettings = playbackSettingsStore.settings
 
 function togglePlaybackSetting(key: PlaybackSettingKey, value: boolean) {
   void playbackSettingsStore.set(key, value)
+}
+
+// 字幕翻译：本地小模型英译中，默认关；三个播放器共用同一个翻译器（缓存共享）。
+const translateSettingsStore = createTranslateSettings(
+  ShellService as unknown as TranslateSettingsApi,
+  (e) => handleError(e),
+)
+const translateSettings = translateSettingsStore.settings
+const subtitleTranslator = createSubtitleTranslator(
+  ShellService as unknown as TranslateSubtitleApi,
+)
+function translateSubtitleText(text: string): Promise<string> {
+  return subtitleTranslator.translate(text)
+}
+function toggleTranslateSetting(value: boolean) {
+  void translateSettingsStore.setEnabled(value)
+}
+const translateModel = computed({
+  get: () => translateSettings.value.Model,
+  set: (v: string) => { void translateSettingsStore.setModel(v) },
+})
+const translateEndpoint = computed({
+  get: () => translateSettings.value.Endpoint,
+  set: (v: string) => { void translateSettingsStore.setEndpoint(v) },
+})
+const translateModelMsg = ref('')
+async function checkTranslateModel() {
+  const ok = await translateSettingsStore.checkModel()
+  translateModelMsg.value = ok ? '本地模型就绪，可以开字幕翻译' : ''
 }
 
 const cardContextMenu = ref<{
@@ -645,7 +676,7 @@ async function switchMode(m: 'home' | 'vod' | 'live' | 'library' | 'search' | 'f
   }
   else if (m === 'home') { navScrolled.value = false; await refreshHome() }
   else if (m === 'library') { await loadLibrary(); await refreshHome() }
-  else if (m === 'settings') { await reloadSourceHistory(); await reloadInsecureTLSHosts(); await refreshLogs(); await loadSearchThreads(); await loadSearchCacheTTL(); await playbackSettingsStore.load() }
+  else if (m === 'settings') { await reloadSourceHistory(); await reloadInsecureTLSHosts(); await refreshLogs(); await loadSearchThreads(); await loadSearchCacheTTL(); await playbackSettingsStore.load(); await translateSettingsStore.load() }
 }
 
 async function refreshHome() {
@@ -2246,7 +2277,7 @@ onBeforeUnmount(() => {
       <aside class="player">
         <p v-if="liveNowPlaying" class="now">正在播放：{{ liveNowPlaying }}</p>
         <p v-if="livePlaybackStatus === 'error'" class="playback-error" aria-live="assertive">频道播放失败：{{ livePlaybackError }}</p>
-        <PlaybackView :plan="livePagePlaybackPlan" @fallback="(id, position) => fallbackToMpv('live', id, livePlaybackToken, position)" />
+        <PlaybackView :plan="livePagePlaybackPlan" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" @fallback="(id, position) => fallbackToMpv('live', id, livePlaybackToken, position)" />
       </aside>
 
       <section class="channels">
@@ -2296,7 +2327,7 @@ onBeforeUnmount(() => {
           <p v-if="vodNowPlaying" class="now">正在播放：{{ vodNowPlaying }}</p>
           <p v-if="vodPlaybackStatus === 'preparing'" class="playback-status" aria-live="polite">正在加载本地视频…</p>
           <p v-if="vodPlaybackStatus === 'error'" class="playback-error" aria-live="assertive">本地视频播放失败：{{ vodPlaybackError }}</p>
-          <PlaybackView :plan="libraryPagePlaybackPlan" :seek-to="pendingSeek" empty-text="点右侧视频开始播放" @fallback="(id, position) => fallbackToMpv('vod', id, vodPlaybackToken, position)" @progress="(time, duration) => onLibraryProgress(vodPlaybackToken, time, duration)" />
+          <PlaybackView :plan="libraryPagePlaybackPlan" :seek-to="pendingSeek" empty-text="点右侧视频开始播放" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" @fallback="(id, position) => fallbackToMpv('vod', id, vodPlaybackToken, position)" @progress="(time, duration) => onLibraryProgress(vodPlaybackToken, time, duration)" />
         </aside>
         <div class="library-side">
           <div v-if="libraryMessage" class="ok">{{ libraryMessage }}</div>
@@ -2463,6 +2494,20 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="src-section">
+        <h3>字幕翻译</h3>
+        <p class="home-empty">本地小模型把英文字幕实时翻成中文（需本机装 Ollama 并拉取模型；失败时显示原文，不影响播放）。</p>
+        <div class="settings-personalize">
+          <button type="button" class="settings-choice" :class="{ active: translateSettings.Enabled }" title="开启后，播放时英文字幕实时翻译成中文显示" :aria-pressed="translateSettings.Enabled" @click="toggleTranslateSetting(!translateSettings.Enabled)">字幕翻译：{{ translateSettings.Enabled ? '开' : '关' }}</button>
+          <button type="button" class="settings-choice" @click="checkTranslateModel">检测模型</button>
+        </div>
+        <div v-if="translateSettings.Enabled" class="src-add">
+          <label>模型 <input v-model="translateModel" type="text" placeholder="qwen2.5:3b" /></label>
+          <label>地址 <input v-model="translateEndpoint" type="text" placeholder="http://127.0.0.1:11434" /></label>
+        </div>
+        <p v-if="translateModelMsg" class="home-empty">{{ translateModelMsg }}</p>
+      </section>
+
+      <section class="src-section">
         <h3>关于</h3>
         <div class="src-add about-actions">
           <button @click="checkUpdate">检查更新</button>
@@ -2515,7 +2560,7 @@ onBeforeUnmount(() => {
             <div class="vod-detail-main">
               <div class="vod-player">
                 <p v-if="vodPlaybackStatus === 'error'" class="playback-error" aria-live="assertive">剧集播放失败：{{ vodPlaybackError }}</p>
-                <PlaybackView :plan="vodPagePlaybackPlan" :seek-to="pendingSeek" :loading="vodPlayerLoading" :skip-marks="vodSkipMarks" @mark-intro="(p) => markSkipAt('intro', p)" @mark-outro="(p) => markSkipAt('outro', p)" @reset-intro="resetSkipMark('intro')" @reset-outro="resetSkipMark('outro')" :suppress-fallback="playbackSettings.AutoSwitchSource" @fallback="(id, position) => fallbackToMpv('vod', id, vodPlaybackToken, position)" @playback="(state, message) => onVodPlaybackSignal(vodPlaybackToken, state, message)" @progress="(time, duration) => onVodProgress(vodPlaybackToken, time, duration)" />
+                <PlaybackView :plan="vodPagePlaybackPlan" :seek-to="pendingSeek" :loading="vodPlayerLoading" :skip-marks="vodSkipMarks" @mark-intro="(p) => markSkipAt('intro', p)" @mark-outro="(p) => markSkipAt('outro', p)" @reset-intro="resetSkipMark('intro')" @reset-outro="resetSkipMark('outro')" :suppress-fallback="playbackSettings.AutoSwitchSource" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" @fallback="(id, position) => fallbackToMpv('vod', id, vodPlaybackToken, position)" @playback="(state, message) => onVodPlaybackSignal(vodPlaybackToken, state, message)" @progress="(time, duration) => onVodProgress(vodPlaybackToken, time, duration)" />
                 <PreloadView :plan="preloadPlan" />
                 <div v-if="vodSkipNotice" class="skip-notice">{{ vodSkipNotice }}</div>
               </div>

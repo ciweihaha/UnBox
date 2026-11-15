@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Hls, { type ErrorData, type Events } from 'hls.js'
 import mpegts from 'mpegts.js'
 import { useHlsTracks, type TrackState } from '../useHlsTracks'
+import { activeCueText } from '../subtitleTranslate'
 import type { VodSkipMarks } from '../vodSkip'
 import TrackMenu from './TrackMenu.vue'
 
@@ -27,6 +28,10 @@ const props = defineProps<{
   loading?: boolean
   /** 当前剧集的跳过标记（秒，0 为未标记），由 App 持久化。 */
   skipMarks?: VodSkipMarks
+  /** 本地字幕翻译开关（设置页「字幕翻译」）；开时英文字幕实时翻成中文显示。 */
+  translateEnabled?: boolean
+  /** 逐条翻译函数（App 注入，内部带缓存与失败回退原文）；不传表示不翻译。 */
+  translateText?: (text: string) => Promise<string>
 }>()
 const emit = defineEmits<{
   fallback: [id: string, position: number]
@@ -40,6 +45,13 @@ const emit = defineEmits<{
 const video = ref<HTMLVideoElement | null>(null)
 const trackState = ref<TrackState | null>(null)
 const menuOpen = ref(false)
+// 字幕翻译：译文覆盖层文本；translationSeq 丢弃过期的在途翻译；
+// hiddenSubtitleTracks 记下为防重影而隐藏的原生轨道，关闭翻译时恢复。
+const translatedSubtitle = ref('')
+let translationSeq = 0
+const hiddenSubtitleTracks = new Set<TextTrack>()
+const boundCueTracks = new Map<TextTrack, () => void>()
+let textTracksAddListener: ((event: Event) => void) | null = null
 // 画面旋转角度（度），90/270 时按容器比例缩放，避免旋转后画面被裁掉。
 const rotation = ref(0)
 // 自绘播放控件状态：原生 controls 会跟着画面一起旋转，且全屏时无法与工具按钮共存。
@@ -84,6 +96,97 @@ const MAX_NETWORK_RESTARTS = 3
 const MAX_MEDIA_RECOVERIES = 2
 const isHls = computed(() => props.plan?.Backend === 'web' && props.plan?.Kind === 'hls' && Hls.isSupported())
 
+// hideTrackForTranslation 把正在显示的原生字幕轨藏起来，只留译文覆盖层，防重影。
+function hideTrackForTranslation(track: TextTrack) {
+  if (track.mode === 'showing') {
+    track.mode = 'hidden'
+    hiddenSubtitleTracks.add(track)
+  }
+}
+
+// restoreHiddenTracks 把翻译期间隐藏的原生轨道恢复显示。
+function restoreHiddenTracks() {
+  hiddenSubtitleTracks.forEach((track) => {
+    track.mode = 'showing'
+  })
+  hiddenSubtitleTracks.clear()
+}
+
+// onSubtitleCueChange：活动 cue 变化时翻译当前句；cue 结束（无活动 cue）清掉译文。
+function onSubtitleCueChange(track: TextTrack) {
+  const text = activeCueText(track)
+  if (!props.translateEnabled || !props.translateText || text === '') {
+    translatedSubtitle.value = ''
+    return
+  }
+  hideTrackForTranslation(track)
+  const seq = ++translationSeq
+  void props.translateText(text).then((out) => {
+    if (seq === translationSeq) translatedSubtitle.value = out
+  })
+}
+
+// bindTranslationTrack 给一条字幕轨挂 cuechange；重复挂同一条直接跳过。
+function bindTranslationTrack(track: TextTrack) {
+  if (boundCueTracks.has(track)) return
+  const handler = () => onSubtitleCueChange(track)
+  track.addEventListener('cuechange', handler)
+  boundCueTracks.set(track, handler)
+}
+
+// unbindTranslationTracks 摘掉全部 cuechange 监听（切集/卸载时调用）。
+function unbindTranslationTracks() {
+  boundCueTracks.forEach((handler, track) => {
+    track.removeEventListener('cuechange', handler)
+  })
+  boundCueTracks.clear()
+  const element = video.value
+  if (element && textTracksAddListener) {
+    element.textTracks.removeEventListener('addtrack', textTracksAddListener)
+    textTracksAddListener = null
+  }
+}
+
+// bindAllTranslationTracks 挂当前全部字幕轨，并监听后到的轨道
+// （hls.js 在清单加载后才加轨道，晚到的也要挂上）。
+function bindAllTranslationTracks() {
+  const element = video.value
+  if (!element) return
+  const list = element.textTracks
+  for (let i = 0; i < list.length; i++) {
+    const track = list[i]
+    if (track) bindTranslationTrack(track)
+  }
+  if (!textTracksAddListener) {
+    textTracksAddListener = (event: Event) => {
+      const track = (event as TrackEvent).track as TextTrack | null
+      if (track) {
+        bindTranslationTrack(track)
+        if (props.translateEnabled) hideTrackForTranslation(track)
+      }
+    }
+    list.addEventListener('addtrack', textTracksAddListener)
+  }
+}
+
+// applyTranslationMode：翻译开启时把当前显示中的轨道藏起来；
+// 关闭时恢复原生轨道并清掉译文与在途翻译。
+function applyTranslationMode() {
+  const element = video.value
+  if (!element) return
+  if (props.translateEnabled) {
+    const list = element.textTracks
+    for (let i = 0; i < list.length; i++) {
+      const track = list[i]
+      if (track) hideTrackForTranslation(track)
+    }
+    return
+  }
+  translationSeq++
+  translatedSubtitle.value = ''
+  restoreHiddenTracks()
+}
+
 function cleanup() {
   attachGeneration++
   trackState.value?.detach(); trackState.value = null
@@ -93,6 +196,10 @@ function cleanup() {
   currentTime.value = 0
   duration.value = 0
   pipActive.value = false
+  translationSeq++
+  translatedSubtitle.value = ''
+  unbindTranslationTracks()
+  restoreHiddenTracks()
   clearHideTimer()
   if (clickTimer !== null) {
     clearTimeout(clickTimer)
@@ -490,6 +597,8 @@ function onCanPlay() {
 
 function onSelectSubtitle(index: number) {
   trackState.value?.selectSubtitle(index)
+  // hls.js 会把新轨设为 showing，翻译开着就立刻藏起来防重影。
+  applyTranslationMode()
 }
 
 function onDocumentClick(event: MouseEvent) {
@@ -519,6 +628,8 @@ async function attach(plan: PlaybackPlan | null) {
     hls.on(Hls.Events.ERROR, onHlsError)
     hls.loadSource(plan.URL); hls.attachMedia(element)
     trackState.value = useHlsTracks(hls)
+    bindAllTranslationTracks()
+    applyTranslationMode()
     return
   }
   if ((plan.Kind === 'flv' || plan.Kind === 'ts') && mpegts.getFeatureList().mseLivePlayback) {
@@ -526,10 +637,22 @@ async function attach(plan: PlaybackPlan | null) {
     flv.on(mpegts.Events.ERROR, onMpegtsError); flv.attachMediaElement(element); flv.load(); return
   }
   element.src = plan.URL
+  bindAllTranslationTracks()
+  applyTranslationMode()
 }
 
 watch(() => props.plan, attach, { immediate: true })
 watch(() => props.seekTo, applySeek)
+// 翻译开关变化：开时藏原生轨、关时恢复原生轨并清译文。
+watch(() => props.translateEnabled, () => {
+  bindAllTranslationTracks()
+  applyTranslationMode()
+})
+// 用户切字幕轨：hls.js 会把新轨设为 showing，翻译开着就立刻藏起来防重影。
+watch(() => trackState.value?.currentSubtitle, () => {
+  bindAllTranslationTracks()
+  applyTranslationMode()
+})
 // 轨道菜单打开期间固定显示控件，关闭后再按播放状态决定何时自动隐藏。
 watch(menuOpen, (open) => {
   if (open) {
@@ -573,6 +696,7 @@ onBeforeUnmount(() => {
       @dblclick="onVideoDblClick"
       @click="onVideoClick"
       @error="onVideoError" />
+    <div v-if="translatedSubtitle" class="subtitle-translation" role="status">{{ translatedSubtitle }}</div>
     <div v-if="seeking && !loading" class="seek-notice" role="status" aria-live="polite">正在跳转…</div>
     <div v-if="loading" class="player-loading" role="status" aria-live="polite">
       <span class="player-loading-spinner" aria-hidden="true"></span>

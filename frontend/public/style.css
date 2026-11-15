@@ -958,6 +958,25 @@ body {
 .playback-view { position: relative; width: 100%; background: var(--deep); min-height: 180px; aspect-ratio: 16 / 9; display: grid; place-items: center; overflow: hidden; }
 .playback-view video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 
+/* 本地字幕翻译的译文覆盖层：居中贴底、黑底白字，盖在原生字幕位置（原生轨已设 hidden）。 */
+.subtitle-translation {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  transform: translateX(-50%);
+  max-width: 90%;
+  padding: 2px 10px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 1.05rem;
+  line-height: 1.5;
+  text-align: center;
+  white-space: pre-line;
+  pointer-events: none;
+  z-index: 5;
+}
+
 /* 画面旋转：transform 过渡 + 容器裁剪，避免旋转过程中内容溢出 */
 .playback-view video { transition: transform 0.2s ease; }
 
