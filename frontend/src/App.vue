@@ -388,6 +388,19 @@ const heroProgress = computed(() => {
   return Math.min(1, Math.max(0, h.Progress / h.Duration))
 })
 
+// 海报加载失败时显示渐变封面：imgError 只会隐藏坏图，v-else 只在无 Logo
+// 时渲染；加载失败不处理会留一个空横幅/空海报框。失败状态随当前影片切换复位。
+const heroLogoFailed = ref(false)
+watch(heroItem, () => { heroLogoFailed.value = false })
+
+const top10FailedLogos = ref(new Set<string>())
+function onTop10PosterError(item: VodItem) {
+  top10FailedLogos.value = new Set(top10FailedLogos.value).add(item.ID + (item.Site || ''))
+}
+
+const detailLogoFailed = ref(false)
+watch(vodDetail, () => { detailLogoFailed.value = false })
+
 // 顶部导航在首页横幅上的滚动态：横幅顶部通透，下滑后变实底。
 const navScrolled = ref(false)
 function onHomeScroll(event: Event) {
@@ -409,10 +422,13 @@ const navActive = computed(() => {
   return ''
 })
 
-// 首页海报行：为你精选 / Top 10 取当前点播分类已加载的第一页真实列表，
-// 我的片单行取真实收藏。没有数据时行整体不渲染，不编造占位内容。
-const featuredRowItems = computed(() => vodCardItems.value.slice(0, 10))
-const top10Items = computed(() => visibleVodItems.value.slice(0, 10))
+// 首页海报行只取点播列表（vodListItems），不用 visibleVodItems：
+// 用户刚搜完回首页时 visibleVodItems 是搜索结果，行会错显示搜索结果。
+// 为你精选取第 11–20 条，与 Top 10（前 10 条）错开——原来两行是同一份
+// 前 10 条，贴在一起像重复。列表不足 10 条时精选行不渲染。
+const homeListCardItems = computed<ContentCardItem[]>(() => vodListItems.value.map(vodCardItem))
+const featuredRowItems = computed(() => homeListCardItems.value.slice(10, 20))
+const top10Items = computed(() => vodListItems.value.slice(0, 10))
 const favoriteRowItems = computed(() => favoriteCardItems.value.slice(0, 10))
 
 // 详情弹窗里的「更多类似内容」：与当前详情同一份真实列表（搜索进来用搜索
@@ -2042,7 +2058,7 @@ onBeforeUnmount(() => {
     <section v-if="mode === 'home'" class="home" @scroll="onHomeScroll">
       <div v-if="heroItem" class="home-hero">
         <div class="home-hero-bg" aria-hidden="true">
-          <img v-if="heroItem.VodLogo" :src="heroItem.VodLogo" alt="" @error="imgError" />
+          <img v-if="heroItem.VodLogo && !heroLogoFailed" :src="heroItem.VodLogo" alt="" @error="heroLogoFailed = true" />
           <span v-else class="home-hero-fallback" :style="{ background: posterGradient(heroItem.VodTitle) }"></span>
         </div>
         <div class="home-hero-body">
@@ -2092,7 +2108,7 @@ onBeforeUnmount(() => {
               list-class="netflix-row"
               :items="featuredRowItems"
               :style="'grid'"
-              @select="(i) => openVodDetail(visibleVodItems[i])"
+              @select="(i) => openVodDetail(vodListItems[i + 10])"
             />
             <button class="netflix-row-arrow next" type="button" aria-label="向右滚动" @click="scrollRow($event, 1)">›</button>
           </div>
@@ -2106,7 +2122,7 @@ onBeforeUnmount(() => {
               <button v-for="(item, index) in top10Items" :key="item.ID + (item.Site || '')" type="button" class="top10-item" :aria-label="'第 ' + (index + 1) + ' 名《' + item.Title + '》'" @click="openVodDetail(item)">
                 <span class="top10-num" aria-hidden="true">{{ index + 1 }}</span>
                 <span class="top10-poster">
-                  <img v-if="item.Logo" :src="item.Logo" alt="" loading="lazy" referrerpolicy="no-referrer" @error="imgError" />
+                  <img v-if="item.Logo && !top10FailedLogos.has(item.ID + (item.Site || ''))" :src="item.Logo" alt="" loading="lazy" referrerpolicy="no-referrer" @error="onTop10PosterError(item)" />
                   <span v-else class="content-card-fallback" :style="{ background: posterGradient(item.Title) }" aria-hidden="true">{{ item.Title.slice(0, 1) }}</span>
                 </span>
               </button>
@@ -2129,7 +2145,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <p v-if="!homeHistory.length && !vodCardItems.length && !vodFavorites.length" class="home-empty">暂无观看记录，去「点播」看看吧</p>
+        <p v-if="!homeHistory.length && !vodListItems.length && !vodFavorites.length" class="home-empty">暂无观看记录，去「点播」看看吧</p>
       </div>
     </section>
 
@@ -2457,11 +2473,12 @@ onBeforeUnmount(() => {
         <div class="vod-detail">
             <div class="vod-detail-hero">
               <div class="vod-hero-bg" aria-hidden="true">
-                <img v-if="vodDetail.Logo" :src="vodDetail.Logo" alt="" @error="imgError" />
+                <img v-if="vodDetail.Logo && !detailLogoFailed" :src="vodDetail.Logo" alt="" @error="detailLogoFailed = true" />
+                <span v-else class="vod-hero-bg-fallback" :style="{ background: posterGradient(vodDetail.Title) }" aria-hidden="true"></span>
               </div>
               <div class="vod-hero-body">
                 <span class="vod-hero-poster">
-                  <img v-if="vodDetail.Logo" :src="vodDetail.Logo" class="poster" referrerpolicy="no-referrer" @error="imgError" />
+                  <img v-if="vodDetail.Logo && !detailLogoFailed" :src="vodDetail.Logo" class="poster" referrerpolicy="no-referrer" @error="detailLogoFailed = true" />
                   <span v-else class="content-card-fallback" :style="{ background: posterGradient(vodDetail.Title) }" aria-hidden="true">{{ vodDetail.Title.slice(0, 1) }}</span>
                 </span>
                 <div class="vod-hero-info">

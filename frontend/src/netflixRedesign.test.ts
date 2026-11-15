@@ -142,3 +142,38 @@ describe('player red progress contract', () => {
     expect(stylesheet).toMatch(/\.ctrl-seek::-webkit-slider-runnable-track\s*\{[^}]*#e50914/s)
   })
 })
+
+describe('home rows contract', () => {
+  it('sources home rows from the vod list, never from search results', () => {
+    // 搜完回首页时 visibleVodItems 是搜索结果；行必须只取 vodListItems。
+    expect(app).toMatch(/homeListCardItems\s*=\s*computed[^\n]*vodListItems\.value\.map\(vodCardItem\)/)
+    expect(app).toMatch(/top10Items\s*=\s*computed\([^\n]*vodListItems\.value\.slice\(0,\s*10\)/)
+    expect(app).not.toMatch(/featuredRowItems\s*=\s*computed\([^\n]*visibleVodItems/)
+    expect(app).not.toMatch(/top10Items\s*=\s*computed\([^\n]*visibleVodItems/)
+  })
+
+  it('does not show the same ten items in both home rows', () => {
+    // Top 10 取前 10 条，为你精选取第 11–20 条；点选精选行按 i + 10 取回原条目。
+    expect(app).toMatch(/featuredRowItems\s*=\s*computed\([^\n]*slice\(10,\s*20\)/)
+    expect(app).toContain('openVodDetail(vodListItems[i + 10])')
+  })
+})
+
+describe('poster fallback contract', () => {
+  it('shows the gradient fallback when a poster url fails to load, not an empty box', () => {
+    // imgError 只隐藏坏图；失败状态必须让 v-else 的渐变封面渲染出来。
+    expect(app).toContain('heroLogoFailed')
+    expect(app).toMatch(/heroItem\.VodLogo && !heroLogoFailed/)
+    expect(app).toContain('top10FailedLogos')
+    expect(app).toMatch(/item\.Logo && !top10FailedLogos\.has\(/)
+    expect(app).toContain('detailLogoFailed')
+    expect(app).toMatch(/vodDetail\.Logo && !detailLogoFailed/)
+    expect(cardList).toContain('failedLogos')
+    expect(cardList).toMatch(/item\.logo && !failedLogos\.has\(item\.key\)/)
+  })
+
+  it('gives the detail backdrop a gradient fallback with the same blurred fill', () => {
+    expect(app).toContain('vod-hero-bg-fallback')
+    expect(stylesheet).toMatch(/\.vod-hero-bg-fallback\s*\{[^}]*filter:\s*blur\(24px\)/s)
+  })
+})
