@@ -2239,11 +2239,12 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="showVodNoResults" class="home-empty">暂无搜索结果</p>
       <p v-if="completedSearchQuery && !searching && vodSearchItems.length" class="search-count">找到 {{ vodSearchItems.length }} 条结果</p>
+      <p v-if="searching && !vodSearchItems.length" class="search-loading">正在搜索…</p>
       <section class="vod-main search-results">
         <ContentCardList
           ref="searchListRef"
           :items="vodCardItems"
-          :style="contentCardStyle"
+          :style="'grid'"
           :divider-after="searchStrongCount"
           divider-label="弱相关结果"
           @select="(i) => openVodDetail(vodSearchItems[i])"
