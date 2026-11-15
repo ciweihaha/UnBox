@@ -42,6 +42,14 @@ const emit = defineEmits<{
   atBottomChange: [atBottom: boolean]
 }>()
 
+// 海报加载失败时显示渐变封面：imgError 只会隐藏坏图，v-else 只在无 logo
+// 时渲染；加载失败不处理会留一个空海报框。失败 key 常驻（海报地址稳定），
+// 同 key 换了新地址的极少数情况会沿用旧失败状态。
+const failedLogos = ref(new Set<string>())
+function onPosterError(item: ContentCardItem) {
+  failedLogos.value = new Set(failedLogos.value).add(item.key)
+}
+
 // 直接挂在真实滚动容器 <ul> 上，滚动当帧就能上报，不依赖父级透传或定时轮询。
 function onListScroll() {
   const el = listEl.value
@@ -150,7 +158,7 @@ defineExpose({
         <!-- 卡片模式：海报 2:3 在上（徽标/进度/播放按钮叠在海报上），标题与副标题
              在海报下方正常排布，不再压在图上；无海报时用标题生成的稳定渐变封面。 -->
         <span class="content-card-poster">
-          <img v-if="item.logo" :src="item.logo" class="thumb" loading="lazy" referrerpolicy="no-referrer" @error="imgError" />
+          <img v-if="item.logo && !failedLogos.has(item.key)" :src="item.logo" class="thumb" loading="lazy" referrerpolicy="no-referrer" @error="onPosterError(item)" />
           <span v-else class="content-card-fallback" :style="{ background: posterGradient(item.title) }" aria-hidden="true">{{ item.title.slice(0, 1) }}</span>
           <span v-if="item.site" class="content-card-badge content-card-site">{{ item.site }}</span>
           <span v-if="item.progress" class="content-card-badge content-card-progress scrollx" @mouseenter="scrollxEnter" @mouseleave="scrollxLeave">
