@@ -538,7 +538,10 @@ func (s *ShellService) ListSources() ([]SourceRecord, error) {
 	return out, nil
 }
 
-// DeleteSource 删除一条导入源历史。
+// DeleteSource 删除一条导入源：只删历史记录不够——源仍留在内存里可继续用，
+// 订阅快照也没更新，重启后 RestoreSubscription 会把它原样恢复回来，
+// 等于删了个寂寞。这里把当前正在用的那份源一并卸掉并落盘快照；ref 与
+// 当前正在用的不一致时（早已被新导入替换的历史条目）只删记录。
 func (s *ShellService) DeleteSource(kind, ref string) error {
 	if s.store == nil {
 		return nil
@@ -546,7 +549,29 @@ func (s *ShellService) DeleteSource(kind, ref string) error {
 	if err := s.store.DeleteSource(kind, ref); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	switch kind {
+	case "vod":
+		if ref == s.vodRef {
+			s.vods = map[string]provider.Provider{}
+			s.vodNames = map[string]string{}
+			s.vodSiteLines = map[string]string{}
+			s.vodCFGs = nil
+			s.vodRef = ""
+		}
+	case "live":
+		if ref == s.liveRef {
+			s.live = nil
+			s.liveSources = nil
+			s.liveCount = 0
+			s.liveCFGs = nil
+			s.liveChannels = nil
+			s.liveRef = ""
+		}
+	}
+	s.mu.Unlock()
 	s.clearVodCategoryCache()
+	s.saveSubscription()
 	return nil
 }
 

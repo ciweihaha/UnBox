@@ -278,6 +278,41 @@ func TestGroupsAndChannels(t *testing.T) {
 	}
 }
 
+// TestDeleteSourceUnloadsAndPersists：删源不能只删历史记录——源必须立即从
+// 内存卸掉（当场不可用），且订阅快照要同步落盘，否则重启后
+// RestoreSubscription 会把删掉的源原样恢复回来。
+func TestDeleteSourceUnloadsAndPersists(t *testing.T) {
+	svc := newTestService(t)
+	path := t.TempDir() + "/ch.m3u"
+	if err := os.WriteFile(path, []byte("#EXTM3U\n#EXTINF:-1 group-title=\"测试\",频道A\nhttp://x/a\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	r, err := svc.ImportSubscription(path)
+	if err != nil || r.Channels != 1 {
+		t.Fatalf("ImportSubscription = %+v, %v", r, err)
+	}
+	if err := svc.DeleteSource("live", path); err != nil {
+		t.Fatalf("DeleteSource: %v", err)
+	}
+	gs, _ := svc.Groups()
+	if len(gs) != 0 {
+		t.Fatalf("删除后 Groups 应为空，got %v", gs)
+	}
+	// 模拟重启：同一 store 上新服务恢复订阅，删掉的源不应回来。
+	svc2 := NewShellService(nil, nil, svc.store)
+	r2, err := svc2.RestoreSubscription()
+	if err != nil {
+		t.Fatalf("RestoreSubscription: %v", err)
+	}
+	if r2.Channels != 0 || r2.LiveSources != 0 {
+		t.Fatalf("重启恢复后删掉的源不应回来: %+v", r2)
+	}
+	gs2, _ := svc2.Groups()
+	if len(gs2) != 0 {
+		t.Fatalf("重启恢复后 Groups 应为空，got %v", gs2)
+	}
+}
+
 func TestFavoriteRoundtrip(t *testing.T) {
 	svc := newTestService(t)
 	id := "央视/CCTV-1"
