@@ -46,22 +46,23 @@ describe('vod layout contract', () => {
     expect(stylesheet).toMatch(/\.vod-main ul\.content-card-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(min\(100%, var\(--content-col\)\), 1fr\)\);/s)
   })
 
-  it('sizes each poster row to the full poster height', () => {
-    // 海报卡靠 aspect-ratio 定高，行高由自动网格行推出来。overflow: hidden 会把卡片变成
-    // 滚动容器，浏览器就不拿 aspect-ratio 去撑那一行：1280×800 下行只有 168px、海报有
-    // 255px，整列海报互相压在一起。overflow: clip 同样裁掉圆角外的溢出，但不是滚动
-    // 容器，行高回到海报的真实高度，row-gap 才真的生效。
+  it('sizes each poster to the full poster height', () => {
+    // 2026-11-14 卡片改版：2:3 由海报框 .content-card-poster 承担，标题移到
+    // 海报下方正常排布，卡片本身不再靠 aspect-ratio 定高。海报框仍需
+    // overflow: clip：hidden 会把它变成滚动容器，aspect-ratio 就撑不出行高，
+    // 1280×800 下海报会被压扁、整列互相压在一起；clip 只裁圆角外的溢出，
+    // 不是滚动容器，行高回到海报的真实高度。
+    expect(stylesheet).toMatch(/\.content-card-poster\s*\{[^}]*aspect-ratio:\s*2 \/ 3;/s)
+    expect(stylesheet).toMatch(/\.content-card-poster\s*\{[^}]*overflow:\s*clip;/s)
     expect(stylesheet).toMatch(/\.content-card-grid \.content-card\s*\{[^}]*overflow:\s*clip;/s)
   })
 
-  it('leaves a gap between the progress mask and the title mask', () => {
-    // 两个蒙层都绝对钉在卡底：标题在 bottom:0.35rem，整高约 1.67rem（0.98rem×1.25 行高
-    // + 0.44rem 上下内边距），顶边离卡底约 2.02rem。进度蒙层的 bottom 必须比标题的 bottom
-    // 高出至少 2rem（标题整高 + 一点空隙），否则两块黑底蒙层会像素级黏在一起。
-    const rem = (sel: RegExp) => Number(stylesheet.match(sel)![1])
-    const titleBottom = rem(/\.content-card-title\s*\{[^}]*bottom:\s*([\d.]+)rem/s)
-    const progBottom = rem(/\.content-card-progress\s*\{[^}]*bottom:\s*([\d.]+)rem/s)
-    expect(progBottom - titleBottom).toBeGreaterThanOrEqual(2)
+  it('keeps the title below the poster and the progress badge on it', () => {
+    // 2026-11-14 卡片改版：标题不再是压在海报上的蒙层，改在海报下方正常排布；
+    // 进度徽标仍叠在海报底部，不再需要给标题蒙层留 2rem 空隙。
+    expect(stylesheet).not.toMatch(/\.content-card-title\s*\{[^}]*position:\s*absolute;/s)
+    expect(stylesheet).toMatch(/\.content-card-title\s*\{[^}]*margin-top:\s*0\.45rem;/s)
+    expect(stylesheet).toMatch(/\.content-card-progress\s*\{[^}]*bottom:\s*0\.35rem;/s)
   })
 })
 

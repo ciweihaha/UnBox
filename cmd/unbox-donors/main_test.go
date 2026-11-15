@@ -269,6 +269,30 @@ func TestSignParamsMatchesAfdianScheme(t *testing.T) {
 	}
 }
 
+func TestRunMissingSecretsGuidesToActionsSecrets(t *testing.T) {
+	// 缺失凭据时，报错要直接告诉操作者去哪里补 Secret，而不是只报变量名。
+	t.Setenv("AFDIAN_USER_ID", "")
+	t.Setenv("AFDIAN_TOKEN", "")
+
+	var stdout, stderr bytes.Buffer
+	err := run(context.Background(), &stdout, &stderr, http.DefaultClient, time.Now)
+	if err == nil {
+		t.Fatal("缺少凭据时 run() 应返回错误")
+	}
+	for _, want := range []string{
+		"AFDIAN_USER_ID",
+		"Secrets and variables",
+		"afdian.com/dashboard/dev",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("错误 = %q，缺少指引 %q", err.Error(), want)
+		}
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q，缺少指引 %q", stderr.String(), want)
+		}
+	}
+}
+
 func md5Hex(s string) string {
 	sum := md5.Sum([]byte(s))
 	return hex.EncodeToString(sum[:])

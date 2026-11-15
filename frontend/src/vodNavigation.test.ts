@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createVodSearchCache, isCurrentVodCategoryRequest, isVodSearchCacheValid, nextVodCategoryRequest, nextVodSearchRequest, pickResumeSeek, pickResumeSource, removeVodFavorite, removeVodHistory, removeVodSearchHistory, resolveVodSelection, shouldShowVodNoResults, upsertVodSearchHistory, VOD_SEARCH_CACHE_TTL, vodBackTarget, vodResumeView, vodSearchQueryForReturn } from './vodNavigation'
+import { createVodSearchCache, isCurrentVodCategoryRequest, isVodSearchCacheValid, nextVodCategoryRequest, nextVodSearchRequest, pickResumeSeek, pickResumeSource, removeVodFavorite, removeVodHistory, removeVodSearchHistory, resolveVodSelection, resumeSeekFor, shouldShowVodNoResults, upsertVodSearchHistory, VOD_SEARCH_CACHE_TTL, vodBackTarget, vodResumeView, vodSearchQueryForReturn } from './vodNavigation'
 
 describe('vod navigation', () => {
   it('returns to the page that opened the detail view', () => {
@@ -82,6 +82,22 @@ describe('vod navigation', () => {
     expect(pickResumeSeek(target, 'ep-1')).toBe(0)
     expect(pickResumeSeek(null, 'ep-5')).toBe(0)
     expect(pickResumeSeek({ EpID: 'ep-5', Progress: 0 }, 'ep-5')).toBe(0)
+  })
+
+  it('restarts a finished episode instead of resuming at the end', () => {
+    // 看到结尾（离总时长不足 10 秒）算看完：下次打开应从头播，而不是一
+    // 点开就走到结尾、立刻触发 ended。
+    expect(resumeSeekFor(3595, 3600)).toBe(0)
+    expect(resumeSeekFor(3600, 3600)).toBe(0)
+    expect(resumeSeekFor(3700, 3600)).toBe(0)
+    // 没看完：回到原进度。
+    expect(resumeSeekFor(1800, 3600)).toBe(1800)
+    expect(resumeSeekFor(3589, 3600)).toBe(3589)
+    // 总时长未知（0/NaN）时无法判断是否看完，原样返回进度。
+    expect(resumeSeekFor(500, 0)).toBe(500)
+    expect(resumeSeekFor(500, Number.NaN)).toBe(500)
+    expect(resumeSeekFor(0, 3600)).toBe(0)
+    expect(resumeSeekFor(-5, 3600)).toBe(0)
   })
 
   it('resolves the line, highlighted episode and page for the recorded resume target', () => {

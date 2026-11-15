@@ -72,6 +72,21 @@ export function pickResumeSeek(target: { EpID: string; Progress: number } | null
   return target && target.EpID === epID ? target.Progress : 0
 }
 
+// RESUME_FINISHED_MARGIN_SECONDS：进度离总时长不到这么多秒就视为看完，
+// 续播从头开始——否则看完的剧集下次一点开就走到结尾、立刻触发 ended，
+// 用户还得手动拖回开头。
+export const RESUME_FINISHED_MARGIN_SECONDS = 10
+
+/** resumeSeekFor 把一条观看记录换算成续播起点：已看完（进度离总时长不足
+ *  10 秒）返回 0（从头播），否则回到原进度；总时长未知（0/NaN）时无法判断
+ *  是否看完，原样返回进度。 */
+export function resumeSeekFor(progress: number, duration: number): number {
+  if (!Number.isFinite(progress) || progress <= 0) return 0
+  if (!Number.isFinite(duration) || duration <= 0) return progress
+  if (progress >= duration - RESUME_FINISHED_MARGIN_SECONDS) return 0
+  return progress
+}
+
 export interface VodResumeView {
   source: string
   episodeID: string

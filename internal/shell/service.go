@@ -540,7 +540,10 @@ func (s *ShellService) ListSources() ([]SourceRecord, error) {
 	return out, nil
 }
 
-// DeleteSource 删除一条导入源历史。
+// DeleteSource 删除一条导入源：只删历史记录不够——源仍留在内存里可继续用，
+// 订阅快照也没更新，重启后 RestoreSubscription 会把它原样恢复回来，
+// 等于删了个寂寞。这里把当前正在用的那份源一并卸掉并落盘快照；ref 与
+// 当前正在用的不一致时（早已被新导入替换的历史条目）只删记录。
 func (s *ShellService) DeleteSource(kind, ref string) error {
 	if s.store == nil {
 		return nil
@@ -548,7 +551,29 @@ func (s *ShellService) DeleteSource(kind, ref string) error {
 	if err := s.store.DeleteSource(kind, ref); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	switch kind {
+	case "vod":
+		if ref == s.vodRef {
+			s.vods = map[string]provider.Provider{}
+			s.vodNames = map[string]string{}
+			s.vodSiteLines = map[string]string{}
+			s.vodCFGs = nil
+			s.vodRef = ""
+		}
+	case "live":
+		if ref == s.liveRef {
+			s.live = nil
+			s.liveSources = nil
+			s.liveCount = 0
+			s.liveCFGs = nil
+			s.liveChannels = nil
+			s.liveRef = ""
+		}
+	}
+	s.mu.Unlock()
 	s.clearVodCategoryCache()
+	s.saveSubscription()
 	return nil
 }
 
@@ -2256,14 +2281,20 @@ func (s *ShellService) SetContentCardStyle(style string) error {
 	return s.store.SetKV(contentCardStyleKey, style)
 }
 
-// GetContentCardStyle 返回内容卡片样式；未设置或非法值默认列表。
+// GetContentCardStyle 返回内容卡片样式；未设置时默认卡片（grid）。
+// Netflix 改版（v0.9.9）起默认是海报卡片，只有明确存过「列表」才用列表：
+// 未设置与非法值不能都回退列表，否则前端 normalize 永远拿不到 grid，
+// 新装用户进点播页永远是列表样式。
 func (s *ShellService) GetContentCardStyle() (string, error) {
 	if s.store == nil {
-		return "list", nil
+		return "grid", nil
 	}
-	v, _, err := s.store.GetKV(contentCardStyleKey)
+	v, ok, err := s.store.GetKV(contentCardStyleKey)
 	if err != nil {
-		return "list", err
+		return "grid", err
+	}
+	if !ok {
+		return "grid", nil
 	}
 	if v != "grid" {
 		return "list", nil
@@ -2362,7 +2393,8 @@ func (s *ShellService) emitPlaybackEvent(ev PlaybackEvent) {
 // 读取当前会话 token 后经 Wails "playback:event" 推给前端；无当前 token 时丢弃。
 // 桥接异常不应影响手动播放，因此事件循环错误只记日志并继续。
 func (s *ShellService) startPlaybackBridge() {
-	if s.player == nil {
+	player := s.player
+	if player == nil {
 		return
 	}
 	emit := s.playbackEventEmitter

@@ -8,9 +8,10 @@ describe('content card style', () => {
     expect(styles.map(normalizeContentCardStyle)).toEqual(['list', 'grid'])
   })
 
-  it('falls back to list for missing or invalid values', () => {
-    expect(normalizeContentCardStyle('')).toBe('list')
-    expect(normalizeContentCardStyle('cards')).toBe('list')
+  it('falls back to grid for missing or invalid values', () => {
+    // Netflix 改版（v0.9.9）起默认是海报卡片；只有明确存过「列表」才用列表。
+    expect(normalizeContentCardStyle('')).toBe('grid')
+    expect(normalizeContentCardStyle('cards')).toBe('grid')
   })
 
   it('presents the persisted grid style as the card option', () => {

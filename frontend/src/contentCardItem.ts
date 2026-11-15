@@ -23,11 +23,25 @@ export interface ContentCardItem {
   detail: string
   /** 卡片模式的进度徽标；为空时整块不渲染（收藏与点播列表都没有进度）。 */
   progress?: ContentCardProgress
+  /** 已播比例 0–1（仅继续观看行有）：卡片下方画一条红色进度条。 */
+  progressRatio?: number
 }
 
 /** contentCardSubtitle 拼出列表模式第二行的文本。 */
 export function contentCardSubtitle(item: ContentCardItem): string {
   return [item.site, item.detail].filter(Boolean).join(' · ')
+}
+
+/**
+ * posterGradient 无海报时的渐变封面：按标题算出稳定色相，同一标题永远同一配色，
+ * 不同标题尽量散开。两段深色渐变保证浅色主题下也有足够对比，封面上的首字符
+ * 与标题文字始终可读。
+ */
+export function posterGradient(title: string): string {
+  let hash = 0
+  for (const ch of title) hash = (hash * 31 + ch.codePointAt(0)!) >>> 0
+  const hue = hash % 360
+  return `linear-gradient(135deg, hsl(${hue} 45% 32%) 0%, hsl(${(hue + 40) % 360} 55% 22%) 100%)`
 }
 
 /**
