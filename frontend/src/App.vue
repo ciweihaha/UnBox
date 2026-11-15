@@ -18,7 +18,7 @@ import { VodAutomation, nextEpisodeInSource, sameNameEpisodeOnSource, type VodAu
 import { resolveSkipAction, type SkipRuntime, type VodSkipMarks } from './vodSkip'
 import { initializeHomeState } from './startup'
 import { isMpvUnavailableError, mpvInstallHint, playbackPlanForMode, resolvePlaybackFallback, shouldPauseStalePlayback, shouldRecordVodProgress, shouldShowMpvInstallPrompt, type ActivePlaybackSession, type PlaybackScope, type PlaybackStatus } from './playbackScope'
-import { createVodSearchCache, isCurrentVodCategoryRequest, isVodSearchCacheValid, nextVodCategoryRequest, nextVodSearchRequest, pickResumeSeek, removeVodFavorite, removeVodHistory, removeVodSearchHistory, resolveVodSelection, shouldShowVodNoResults, upsertVodSearchHistory, vodBackTarget, vodResumeView, vodSearchQueryForReturn, type VodDetailOrigin, type VodSearchCache, type VodView } from './vodNavigation'
+import { createVodSearchCache, isCurrentVodCategoryRequest, isVodSearchCacheValid, nextVodCategoryRequest, nextVodSearchRequest, pickResumeSeek, removeVodFavorite, removeVodHistory, removeVodSearchHistory, resolveVodSelection, resumeSeekFor, shouldShowVodNoResults, upsertVodSearchHistory, vodBackTarget, vodResumeView, vodSearchQueryForReturn, type VodDetailOrigin, type VodSearchCache, type VodView } from './vodNavigation'
 import { buildVodSourceDeadInfo, vodSourceDeadBackLabel, vodSourceDeadBackTarget, type VodSourceDeadInfo } from './vodSourceDead'
 import { appendVodItems, hasNextVodPage, nextVodPage } from './vodPagination'
 import { countLeadingStrong, sortVodSearchResults } from './vodSearchRelevance'
@@ -915,7 +915,8 @@ async function playLibraryItem(path: string) {
   currentLibraryPath.value = path
   lastProgressSave = 0
   const history = libraryProgress(path)
-  pendingSeek.value = history?.Progress ?? 0
+  // 看完的本地视频下次打开从头播，而不是一打开就走到结尾。
+  pendingSeek.value = resumeSeekFor(history?.Progress ?? 0, history?.Duration ?? 0)
   vodNowPlaying.value = libraryItems.value.find(item => item.Path === path)?.Name ?? path
   try {
     const plan = await ShellService.PrepareLibrary(path) as unknown as PlaybackPlan
@@ -951,8 +952,10 @@ async function applyVodResume(h: VodHistoryInfo) {
   currentEpisodeID.value = view.episodeID
   episodePage.value = view.page
   if (h.EpID) {
-    pendingSeek.value = h.Progress
-    const played = await doPlayEpisode(h.Site, h.EpID, h.EpName, view.source, h.Progress)
+    // 看完的集从头播，而不是一打开就走到结尾、立刻触发 ended。
+    const seek = resumeSeekFor(h.Progress, h.Duration)
+    pendingSeek.value = seek
+    const played = await doPlayEpisode(h.Site, h.EpID, h.EpName, view.source, seek)
     if (played) await applyPendingSeek()
   }
 }
@@ -968,7 +971,8 @@ async function prepareVodResume(site: string, vodID: string) {
     resetEpisodePage()
     currentEpisodeID.value = view.episodeID
     episodePage.value = view.page
-    vodResume.value = { EpID: h.EpID, Progress: h.Progress }
+    // 看完的集下次点开从头播（resumeSeekFor），而不是走到结尾。
+    vodResume.value = { EpID: h.EpID, Progress: resumeSeekFor(h.Progress, h.Duration) }
   } catch (e) { handleError(e) }
 }
 
@@ -1059,6 +1063,9 @@ async function deleteSource(kind: string, ref: string) {
   try {
     await ShellService.DeleteSource(kind, ref)
     await reloadSourceHistory()
+    // 删掉的源已从后端卸掉：刷新对应视图，否则列表里还留着已删源的站点/分组。
+    if (kind === 'vod') await refreshVod()
+    else await reloadGroups()
   } catch (e) { handleError(e) }
 }
 
@@ -1140,7 +1147,7 @@ async function loadSources() {
 
 async function refreshVod() {
   await loadSources()
-  if (activeSite.value) await reloadVodCategories()
+  await reloadVodCategories()
 }
 
 async function selectLine(line: string) {
@@ -1179,6 +1186,14 @@ async function reloadVodCategories() {
   // 否则会把旧站点的维度 key 发给新站点（CMS 可能直接返回空列表）。
   resetVodFilter()
   resetVodListState()
+  if (!activeSite.value) {
+    // 没有可用站点（如删掉了最后一个点播源）：只清空展示状态，不调后端，
+    // 否则空站点会报「点播站点不存在」刷屏。
+    vodCategoryLoading.value = false
+    vodListEnd.value = true
+    vodListAtBottom.value = true
+    return
+  }
   try {
     const categories = (await ShellService.VodCategories(activeSite.value)) ?? []
     if (!isCurrentVodCategoryRequest(request, vodCategoryRequest)) return
@@ -1288,9 +1303,15 @@ function onFilterChipPick(v: Record<string, string>) {
   applyVodFilter()
 }
 
-// 清除筛选：各维度回到第一项（一般即「全部」）并立即应用。
+// 清除筛选：彻底去掉已应用的筛选（active 置 null，即「没有筛选」），
+// 而不是套用各维度第一项——有的站点第一项不是「全部」（如某个具体年份），
+// 套第一项等于偷偷换了一个限制性筛选，清除按钮还会一直亮着。
+// 草稿仍回到第一项，供面板显示用。
 function clearVodFilter() {
-  onFilterChipPick(initialSelections(vodFilterGroups.value))
+  vodFilterDraft.value = initialSelections(vodFilterGroups.value)
+  vodFilterActive.value = null
+  resetVodListState()
+  void reloadVodList()
 }
 
 // 切分类/切站点清空筛选选择与已应用值。
