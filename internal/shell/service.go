@@ -122,7 +122,7 @@ type PlaybackSettings struct {
 var appVersion = "0.0.1"
 
 // updateRepo 是发布仓库（改名后改这里）。
-const updateRepo = "teaGod-s/UnBox"
+const updateRepo = "ciweihaha/UnBox"
 
 // updatePageURL 是最新 release 的网页入口：GitHub 会 302 到 /releases/tag/<tag>，
 // 顺着重定向读 tag 即可，不占 API 配额。
