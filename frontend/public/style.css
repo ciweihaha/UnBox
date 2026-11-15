@@ -41,11 +41,12 @@ body {
   height: var(--nav-h);
   padding: 0 4%;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0) 100%);
-  transition: background-color 0.45s ease;
+  transition: background-color 0.45s ease, box-shadow 0.45s ease;
 }
 
 .topnav.solid {
   background: #141414;
+  box-shadow: var(--shadow-nav);
 }
 
 .topnav .logo {
@@ -627,6 +628,18 @@ body {
   flex: 0 0 auto;
 }
 
+/* 菜单弹出：轻微位移淡入（v-if 挂载即触发）。向下弹的菜单从上 4px 落下，
+   向上弹的（播放器倍速/轨道菜单）从下 4px 升起。 */
+@keyframes menu-pop {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes menu-pop-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* 历史词下拉框：绝对定位覆盖在历史区下方，不挤压搜索结果区 */
 .history-dropdown {
   position: absolute;
@@ -643,7 +656,8 @@ body {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 0.45rem;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-menu);
+  animation: menu-pop 0.15s ease;
   max-height: 12rem;
   overflow-y: auto;
 }
@@ -1164,7 +1178,8 @@ body {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 0.5rem;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-menu);
+  animation: menu-pop-up 0.15s ease;
 }
 
 .rate-menu li {
@@ -1263,7 +1278,8 @@ body {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 0.5rem;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-menu);
+  animation: menu-pop-up 0.15s ease;
 }
 
 .track-menu .track-sec { margin-bottom: 0.4rem; }
@@ -2109,11 +2125,12 @@ body {
   background: var(--row-alt);
   border: 1px solid var(--panel-border);
   border-radius: 8px;
+  box-shadow: var(--shadow-card);
   transition: box-shadow 0.2s ease;
 }
 
 .content-card-grid .content-card:hover .content-card-poster {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .content-card-poster > .thumb {
@@ -2621,6 +2638,12 @@ body {
   /* 圆角层级：卡片与 Hero 用大圆角，面板与按钮用中圆角。 */
   --radius-lg: 0.75rem;
   --radius-md: 0.5rem;
+
+  /* 阴影层级（第 8 项）：导航 < 卡片 < 浮层菜单，菜单最深、双层投影。 */
+  --shadow-nav: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
 
   /* 顶部导航高度：各页用它给固定导航留出顶部空间。 */
   --nav-h: 68px;
