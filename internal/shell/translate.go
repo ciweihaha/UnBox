@@ -1,4 +1,4 @@
-// 本地字幕翻译的壳层胶水：把 internal/translate 的 Ollama 客户端
+// Package shell 的本地字幕翻译胶水：把 internal/translate 的 Ollama 客户端
 // 暴露给前端，并把开关/模型/地址持久化到 store.kv。
 //
 // 客户端按「地址+模型」缓存复用：字幕逐条翻译时同一条只翻一次

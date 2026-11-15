@@ -43,12 +43,9 @@ export function isTranslatableText(text: string): boolean {
 }
 
 /** activeCueText 取字幕轨当前活动 cue 的文本；VTT 行内标签去掉。 */
-export function activeCueText(
-  track: {
-    activeCues?: ArrayLike<{ text?: string }> | null
-  } | null | undefined,
-): string {
-  const cue = track?.activeCues?.[0]
+export function activeCueText(track: TextTrack | null | undefined): string {
+  // TextTrackCue 基类没有 text，只有 VTTCue 有：用交叉类型取文本，缺失按空串处理。
+  const cue = track?.activeCues?.[0] as (TextTrackCue & { text?: string }) | undefined
   const raw = typeof cue?.text === 'string' ? cue.text : ''
   return raw.replace(/<[^>]*>/g, '').trim()
 }
