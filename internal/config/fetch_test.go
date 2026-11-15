@@ -84,6 +84,39 @@ func TestFetchClanSchemeRejected(t *testing.T) {
 	}
 }
 
+// RFC 3986 的 scheme 不区分大小写：用户粘贴的 "HTTP://..."、"FILE://..."
+// 之前会被当成裸本地路径，只剩一句误导的「找不到文件」。
+func TestFetchUppercaseScheme(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"sites":[]}`))
+	}))
+	defer srv.Close()
+
+	f := NewFetcher()
+	upperURL := "HTTP" + srv.URL[len("http"):]
+	body, err := f.Fetch(context.Background(), upperURL)
+	if err != nil {
+		t.Fatalf("大写 HTTP:// 拉取失败: %v", err)
+	}
+	if string(body) != `{"sites":[]}` {
+		t.Errorf("内容不符: got %q", body)
+	}
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c3.json")
+	const content = `{"sites":[]}`
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatalf("写入测试文件失败: %v", err)
+	}
+	body, err = f.Fetch(context.Background(), "FILE://"+filepath.ToSlash(p))
+	if err != nil {
+		t.Fatalf("大写 FILE:// 读取失败: %v", err)
+	}
+	if string(body) != content {
+		t.Errorf("内容不符: got %q, want %q", body, content)
+	}
+}
+
 func TestFetchFollowsRedirects(t *testing.T) {
 	var gotUA string
 	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -225,6 +258,11 @@ func TestLocalPath(t *testing.T) {
 			name: "windows 盘符路径中的百分号编码空格被解码",
 			ref:  "file:///C:/Program%20Files/x.json",
 			want: "C:/Program Files/x.json",
+		},
+		{
+			name: "大写 FILE 前缀同样剥离",
+			ref:  "FILE:///tmp/x.json",
+			want: "/tmp/x.json",
 		},
 	}
 

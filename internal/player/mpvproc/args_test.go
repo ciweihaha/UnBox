@@ -40,6 +40,28 @@ func TestBuildArgsCarriesHeaders(t *testing.T) {
 	}
 }
 
+// 播放地址来自远端规则/订阅，可能以 "-" 开头（如 "--script=..."）；
+// 必须用 "--" 结束选项解析，否则会被 mpv 当成选项执行。
+func TestBuildArgsTerminatesOptionsBeforeURL(t *testing.T) {
+	args := buildArgs(player.Stream{URL: "--script=/tmp/evil.lua"}, "/tmp/x.sock", 0)
+	sep := -1
+	urlIdx := -1
+	for i, a := range args {
+		if a == "--" {
+			sep = i
+		}
+		if a == "--script=/tmp/evil.lua" {
+			urlIdx = i
+		}
+	}
+	if sep < 0 {
+		t.Fatalf("应在 URL 前加 -- 结束选项解析: %v", args)
+	}
+	if urlIdx != sep+1 {
+		t.Fatalf("URL 应紧跟在 -- 之后: sep=%d url=%d args=%v", sep, urlIdx, args)
+	}
+}
+
 // 拿不到 DRM render 节点时（WSLg 默认不在 render 组、容器里干脆没有），
 // mpv 的 EGL/Zink 初始化会失败，随后 x11 vo 二次初始化直接 assert 崩溃：
 //
