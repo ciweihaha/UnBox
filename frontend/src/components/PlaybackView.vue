@@ -51,7 +51,6 @@ const translatedSubtitle = ref('')
 let translationSeq = 0
 const hiddenSubtitleTracks = new Set<TextTrack>()
 const boundCueTracks = new Map<TextTrack, () => void>()
-let textTracksAddListener: ((event: Event) => void) | null = null
 // 画面旋转角度（度），90/270 时按容器比例缩放，避免旋转后画面被裁掉。
 const rotation = ref(0)
 // 自绘播放控件状态：原生 controls 会跟着画面一起旋转，且全屏时无法与工具按钮共存。
@@ -140,15 +139,10 @@ function unbindTranslationTracks() {
     track.removeEventListener('cuechange', handler)
   })
   boundCueTracks.clear()
-  const element = video.value
-  if (element && textTracksAddListener) {
-    element.textTracks.removeEventListener('addtrack', textTracksAddListener)
-    textTracksAddListener = null
-  }
 }
 
-// bindAllTranslationTracks 挂当前全部字幕轨，并监听后到的轨道
-// （hls.js 在清单加载后才加轨道，晚到的也要挂上）。
+// bindAllTranslationTracks 挂当前全部字幕轨；后到的轨道由
+// onHlsSubtitleTracksUpdated（hls.js SUBTITLE_TRACKS_UPDATED）补挂。
 function bindAllTranslationTracks() {
   const element = video.value
   if (!element) return
@@ -157,16 +151,14 @@ function bindAllTranslationTracks() {
     const track = list[i]
     if (track) bindTranslationTrack(track)
   }
-  if (!textTracksAddListener) {
-    textTracksAddListener = (event: Event) => {
-      const track = (event as TrackEvent).track as TextTrack | null
-      if (track) {
-        bindTranslationTrack(track)
-        if (props.translateEnabled) hideTrackForTranslation(track)
-      }
-    }
-    list.addEventListener('addtrack', textTracksAddListener)
-  }
+}
+
+// onHlsSubtitleTracksUpdated：hls.js 字幕轨列表变化（清单解析/后到轨道）时
+// 挂上新轨的 cuechange。不用 video.textTracks 的 addtrack——jsdom 的
+// TextTrackList 没有 addEventListener，个别浏览器实现也不完整。
+function onHlsSubtitleTracksUpdated() {
+  bindAllTranslationTracks()
+  applyTranslationMode()
 }
 
 // applyTranslationMode：翻译开启时把当前显示中的轨道藏起来；
@@ -626,6 +618,7 @@ async function attach(plan: PlaybackPlan | null) {
   if (plan.Kind === 'hls' && Hls.isSupported()) {
     hls = new Hls({ enableWorker: false })
     hls.on(Hls.Events.ERROR, onHlsError)
+    hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, onHlsSubtitleTracksUpdated)
     hls.loadSource(plan.URL); hls.attachMedia(element)
     trackState.value = useHlsTracks(hls)
     bindAllTranslationTracks()

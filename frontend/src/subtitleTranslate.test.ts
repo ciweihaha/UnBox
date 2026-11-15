@@ -143,4 +143,9 @@ describe('播放器字幕翻译接线', () => {
     expect(playbackView).toContain("'hidden'")
     expect(playbackView).toContain("'showing'")
   })
+
+  it('后到字幕轨走 hls.js SUBTITLE_TRACKS_UPDATED，不用 TextTrackList.addEventListener（jsdom 没有它）', () => {
+    expect(playbackView).toContain('SUBTITLE_TRACKS_UPDATED')
+    expect(playbackView).not.toContain('textTracks.addEventListener')
+  })
 })
