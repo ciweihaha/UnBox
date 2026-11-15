@@ -1,21 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-  <!-- UnBox isometric box logo: three faces in three soft colors, smiley on the top face. -->
-  <!-- Top face (soft cream) -->
-  <polygon points="512,72 893,292 512,512 131,292" fill="#F7E7B4"/>
-  <!-- Right face (soft mint) -->
-  <polygon points="893,292 893,732 512,952 512,512" fill="#A8D8C5"/>
-  <!-- Left face (soft sky blue) -->
-  <polygon points="131,292 512,512 512,952 131,732" fill="#A9C9E8"/>
-  <!--
-    Smiley on the top face. The transform maps the square [-1,1]^2 onto the
-    top-face rhombus: s = left-right (along TL<->TR), t = bottom-top (along C<->T).
-    matrix(a,b,c,d,e,f): x = a*s + c*t + e, y = b*s + d*t + f.
-    Eyes are happy squinting arcs (^ ^) rather than round dots, for a relaxed look.
-  -->
-  <g transform="matrix(381 0 0 -220 512 292)">
-    <path d="M -0.44 0.26 Q -0.34 0.40 -0.24 0.26" fill="none" stroke="#5B6472" stroke-width="0.07" stroke-linecap="round"/>
-    <path d="M 0.24 0.26 Q 0.34 0.40 0.44 0.26" fill="none" stroke="#5B6472" stroke-width="0.07" stroke-linecap="round"/>
-    <path d="M -0.30 -0.14 Q 0 -0.34 0.30 -0.14" fill="none" stroke="#5B6472" stroke-width="0.08" stroke-linecap="round"/>
-  </g>
+  <!-- UnBox 新图标（第 12 项）：红底圆角方盒 + 白色播放三角。简洁现代，
+       16px 下仍可辨；红取应用主色 #e50914 一系。 -->
+  <defs>
+    <linearGradient id="box" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F8262F"/>
+      <stop offset="1" stop-color="#C50812"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#box)"/>
+  <!-- 播放三角：描边与填充同色、round 连接，三个角都是圆角。 -->
+  <path id="play" d="M 416 300 L 716 512 L 416 724 Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="48" stroke-linejoin="round"/>
 </svg>
