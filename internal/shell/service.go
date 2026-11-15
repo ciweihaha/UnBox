@@ -2254,14 +2254,20 @@ func (s *ShellService) SetContentCardStyle(style string) error {
 	return s.store.SetKV(contentCardStyleKey, style)
 }
 
-// GetContentCardStyle 返回内容卡片样式；未设置或非法值默认列表。
+// GetContentCardStyle 返回内容卡片样式；未设置时默认卡片（grid）。
+// Netflix 改版（v0.9.9）起默认是海报卡片，只有明确存过「列表」才用列表：
+// 未设置与非法值不能都回退列表，否则前端 normalize 永远拿不到 grid，
+// 新装用户进点播页永远是列表样式。
 func (s *ShellService) GetContentCardStyle() (string, error) {
 	if s.store == nil {
-		return "list", nil
+		return "grid", nil
 	}
-	v, _, err := s.store.GetKV(contentCardStyleKey)
+	v, ok, err := s.store.GetKV(contentCardStyleKey)
 	if err != nil {
-		return "list", err
+		return "grid", err
+	}
+	if !ok {
+		return "grid", nil
 	}
 	if v != "grid" {
 		return "list", nil
@@ -2286,6 +2292,14 @@ func (s *ShellService) RefreshMPV() (mpvplugin.Status, error) {
 		return status, err
 	}
 	s.player = p
+	// 播放器换了，事件桥接必须跟着换：桥接只在服务启动时挂过一次，
+	// 启动时 mpv 缺失（s.player 为 nil）根本没起桥接；旧桥接即使在跑，
+	// 也还堵在旧播放器的 Events 通道上（该通道永不关闭），新播放器的
+	// 播放/进度/结束/错误事件永远到不了前端。不重启桥接，装好 mpv 点
+	// 「重新检测」后播片没有进度、播完不自动切集、出错不自动换源，
+	// 直到重启应用才恢复。
+	s.stopPlaybackBridge()
+	s.startPlaybackBridge()
 	return status, nil
 }
 

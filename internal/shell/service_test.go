@@ -220,8 +220,15 @@ func TestThemeEmptyService(t *testing.T) {
 func TestContentCardStyleRoundTrip(t *testing.T) {
 	svc := newTestService(t)
 	style, err := svc.GetContentCardStyle()
+	if err != nil || style != "grid" {
+		t.Fatalf("默认内容卡片样式应为 grid（Netflix 改版起默认海报卡片）, got %q, %v", style, err)
+	}
+	if err := svc.SetContentCardStyle("list"); err != nil {
+		t.Fatal(err)
+	}
+	style, err = svc.GetContentCardStyle()
 	if err != nil || style != "list" {
-		t.Fatalf("默认内容卡片样式应为 list, got %q, %v", style, err)
+		t.Fatalf("明确存过 list 后应回读 list, got %q, %v", style, err)
 	}
 	if err := svc.SetContentCardStyle("grid"); err != nil {
 		t.Fatal(err)
@@ -769,6 +776,49 @@ func waitForBridgeEvents(t *testing.T, mu *sync.Mutex, got *[]PlaybackEvent, n i
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("等待桥接事件超时")
+}
+
+// TestPlaybackBridgeRestartsWithNewPlayer 覆盖 RefreshMPV 的换播放器路径：
+// 启动时 mpv 缺失（player 为 nil）根本没起桥接；旧桥接即使在跑，也还堵在
+// 旧播放器的 Events 通道上（该通道永不关闭）。换播放器后必须停掉旧桥接、
+// 重新挂上新播放器，否则新播放器的事件永远到不了前端，播片没有进度、
+// 播完不自动切集、出错不自动换源，直到重启应用才恢复。
+func TestPlaybackBridgeRestartsWithNewPlayer(t *testing.T) {
+	oldPlayer := newBridgeTestPlayer()
+	svc := newShellService(nil, oldPlayer, nil)
+
+	var mu sync.Mutex
+	var got []PlaybackEvent
+	svc.playbackEventEmitter = func(ev PlaybackEvent) {
+		mu.Lock()
+		got = append(got, ev)
+		mu.Unlock()
+	}
+	svc.startPlaybackBridge()
+	defer func() { _ = svc.ServiceShutdown() }()
+
+	if _, ok := svc.claimPlayback(7); !ok {
+		t.Fatal("claimPlayback 应接受首个 token")
+	}
+	// 旧播放器的事件能正常转发。
+	oldPlayer.events <- player.Event{Kind: player.EventPosition, Position: 1}
+	waitForBridgeEvents(t, &mu, &got, 1)
+
+	// 模拟 RefreshMPV 换播放器：停旧桥接、换 player、重新挂桥接。
+	newPlayer := newBridgeTestPlayer()
+	svc.stopPlaybackBridge()
+	svc.player = newPlayer
+	svc.startPlaybackBridge()
+
+	// 新播放器的事件应能转发；旧播放器的事件不再被转发。
+	newPlayer.events <- player.Event{Kind: player.EventPosition, Position: 8.25}
+	waitForBridgeEvents(t, &mu, &got, 2)
+	mu.Lock()
+	if len(got) != 2 || got[1] != (PlaybackEvent{Token: 7, Kind: "position", Position: 8.25}) {
+		mu.Unlock()
+		t.Fatalf("换播放器后新事件未转发，got %#v", got)
+	}
+	mu.Unlock()
 }
 
 // preloadTestProvider 是点播预载测试用的最小 Provider。
