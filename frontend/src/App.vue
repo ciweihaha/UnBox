@@ -2548,7 +2548,7 @@ onBeforeUnmount(() => {
     <!-- 点播详情弹窗：海报大图 + 简介 + 播放器 + 剧集 + 更多类似内容 -->
     <div v-if="mode === 'vod' && vodView === 'detail' && vodDetail" class="vod-detail-overlay" @click.self="backFromVodDetail">
       <div class="vod-detail-modal" role="dialog" aria-modal="true" aria-label="影片详情">
-        <VodDetailHeader :now-playing="vodNowPlaying" @back="backFromVodDetail" />
+        <VodDetailHeader @back="backFromVodDetail" />
         <div class="vod-detail">
             <div class="vod-detail-hero">
               <div class="vod-hero-bg" aria-hidden="true">
@@ -2563,8 +2563,10 @@ onBeforeUnmount(() => {
                 <div class="vod-hero-info">
                   <h2>{{ vodDetail.Title }}</h2>
                   <p v-if="vodDetail.Type || vodDetail.Year || vodDetail.Area" class="meta">{{ [vodDetail.Type, vodDetail.Year, vodDetail.Area].filter(Boolean).join(' · ') }}</p>
-                  <p v-if="vodDetail.Remarks" class="vod-hero-remarks">{{ vodDetail.Remarks }}</p>
-                  <button class="favorite-toggle" type="button" :aria-pressed="vodFavorited" @click="toggleVodFavorite">{{ vodFavorited ? '取消收藏' : '收藏' }}</button>
+                  <div class="vod-hero-actions">
+                    <p v-if="vodDetail.Remarks" class="vod-hero-remarks">{{ vodDetail.Remarks }}</p>
+                    <button class="favorite-toggle" type="button" :aria-pressed="vodFavorited" @click="toggleVodFavorite">{{ vodFavorited ? '取消收藏' : '收藏' }}</button>
+                  </div>
                   <div class="desc" :class="{ expanded: descExpanded }" v-html="vodDetail.Description"></div>
                   <button v-if="vodDetail.Description" class="desc-toggle" type="button" @click="descExpanded = !descExpanded">{{ descExpanded ? '收起简介' : '展开简介' }}</button>
                 </div>
@@ -2572,6 +2574,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="vod-detail-main">
               <div class="vod-player">
+                <p v-if="vodNowPlaying" class="vod-now-playing">正在播放：{{ vodNowPlaying }}</p>
                 <p v-if="vodPlaybackStatus === 'error'" class="playback-error" aria-live="assertive">剧集播放失败：{{ vodPlaybackError }}</p>
                 <PlaybackView :plan="vodPagePlaybackPlan" :seek-to="pendingSeek" :loading="vodPlayerLoading" :skip-marks="vodSkipMarks" @mark-intro="(p) => markSkipAt('intro', p)" @mark-outro="(p) => markSkipAt('outro', p)" @reset-intro="resetSkipMark('intro')" @reset-outro="resetSkipMark('outro')" :suppress-fallback="playbackSettings.AutoSwitchSource" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" @fallback="(id, position) => fallbackToMpv('vod', id, vodPlaybackToken, position)" @playback="(state, message) => onVodPlaybackSignal(vodPlaybackToken, state, message)" @progress="(time, duration) => onVodProgress(vodPlaybackToken, time, duration)" />
                 <PreloadView :plan="preloadPlan" />

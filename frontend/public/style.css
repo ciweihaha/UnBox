@@ -490,15 +490,6 @@ body {
   margin-left: 0;
 }
 
-.vod-detail-head .now {
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  color: var(--accent);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .search-page {
   flex: 1;
   min-height: 0;
@@ -776,13 +767,13 @@ body {
   z-index: 1;
   display: flex;
   gap: 1.25rem;
-  align-items: flex-start;
+  align-items: stretch;
   padding: 1.25rem 1.5rem;
 }
 
 .vod-hero-poster {
   flex: 0 0 auto;
-  width: 160px;
+  width: 200px;
   aspect-ratio: 2 / 3;
   overflow: clip;
   border-radius: var(--radius-md);
@@ -802,6 +793,8 @@ body {
 }
 
 .vod-hero-info {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   flex: 1;
   color: var(--text-white);
@@ -822,7 +815,7 @@ body {
 
 .vod-hero-remarks {
   display: inline-block;
-  margin: 0 0 0.6rem;
+  margin: 0;
   padding: 0.15rem 0.6rem;
   color: var(--accent);
   background: rgba(0, 0, 0, 0.4);
@@ -831,9 +824,17 @@ body {
   font-size: 0.8rem;
 }
 
-.vod-hero-info .favorite-toggle {
-  display: block;
+/* 「已完结」徽标与收藏按钮排成一行操作区。 */
+.vod-hero-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
   margin: 0 0 0.6rem;
+}
+
+.vod-hero-info .favorite-toggle {
+  margin: 0;
   color: var(--text-white);
   background: rgba(0, 0, 0, 0.4);
   border-color: rgba(255, 255, 255, 0.35);
@@ -874,6 +875,28 @@ body {
   contain: layout paint;
 }
 
+/* 正在播放状态行：收进播放器上方，弱化显示（圆点 + 暗色文字），不再是弹窗顶部飘红字。 */
+.vod-now-playing {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.5rem;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vod-now-playing::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 0.45rem;
+  height: 0.45rem;
+  background: var(--accent);
+  border-radius: 50%;
+}
+
 .vod-episodes {
   display: flex;
   flex-direction: column;
@@ -895,7 +918,7 @@ body {
 }
 
 .vod-episodes .ep-list {
-  grid-template-columns: repeat(auto-fill, minmax(4rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
   max-height: 22rem;
 }
 
@@ -1290,6 +1313,7 @@ body {
 }
 /* 简介默认限 3 行 + 展开/收起；展开后放开全部。 */
 .vod-detail .desc {
+  flex: 1 1 auto;
   color: var(--text-desc);
   line-height: 1.6;
   display: -webkit-box;
@@ -3364,8 +3388,8 @@ body[data-theme="8bit"],
 .ep-list button {
   width: 100%;
   min-width: 0;
-  padding: 0.3rem 0.6rem;
-  font-size: 0.85rem;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.8rem;
   color: var(--text);
   background: var(--btn-bg);
   border: 1px solid var(--border);
@@ -3750,7 +3774,7 @@ body[data-theme="8bit"],
 }
 
 .vod-detail-modal {
-  max-width: 880px;
+  max-width: 1080px;
   margin: 0 auto;
   overflow: hidden;
   background: #181818;

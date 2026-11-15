@@ -1,11 +1,10 @@
 <script setup lang="ts">
-defineProps<{ nowPlaying: string }>()
+// 详情弹窗头只剩返回按钮；「正在播放：…」已收进播放器上方做状态行，不再飘红字在顶部。
 defineEmits<{ back: [] }>()
 </script>
 
 <template>
   <div class="vod-detail-head">
     <button class="vod-back" type="button" @click="$emit('back')">← 返回</button>
-    <p v-if="nowPlaying" class="now">正在播放：{{ nowPlaying }}</p>
   </div>
 </template>
