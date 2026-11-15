@@ -83,6 +83,33 @@ func TestResolveClassifiesHTTPTransportStream(t *testing.T) {
 	}
 }
 
+// TestNewMergesDuplicateEmbeddedChannels：配置内嵌频道（lives[].channels）
+// 里同组同名重复出现是多线路的常见写法——与 M3U 的同名归并一致，应合并成
+// 一条频道、多条备用源。未合并时列表里出现两条同 ID（组/名），点哪条都解析
+// 到最后一条的流，第一条地址永远播不到。
+func TestNewMergesDuplicateEmbeddedChannels(t *testing.T) {
+	chs := []config.Channel{
+		{Name: "CCTV-1", URLs: []string{"http://x/1a.m3u8"}, Logo: "l1", Group: "央视"},
+		{Name: "CCTV-1", URLs: []string{"http://x/1b.m3u8"}, Group: "央视"},
+		{Name: "湖南卫视", URLs: []string{"http://x/hunan.ts"}, Group: "卫视"},
+	}
+	p := New(chs)
+	pg, err := p.Browse(context.Background(), "央视", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pg.Items) != 1 {
+		t.Fatalf("同组同名应合并成 1 条，got %d 条: %+v", len(pg.Items), pg.Items)
+	}
+	st, err := p.Resolve(context.Background(), "央视/CCTV-1")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if st.URL != "http://x/1a.m3u8" || len(st.Backups) != 1 || st.Backups[0] != "http://x/1b.m3u8" {
+		t.Fatalf("Resolve = %+v，期望主源 1a、备用 1b", st)
+	}
+}
+
 func TestFetchLiveParsesM3U(t *testing.T) {
 	// 用 httptest 起一个 m3u 服务，验证 FetchLive 拉取 + 解析 + 归并同名备份。
 	srv := newM3UTestServer(t, "#EXTM3U\n"+

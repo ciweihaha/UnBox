@@ -29,17 +29,28 @@ type Provider struct {
 // New 从扁平频道列表构建直播源，并按 Group 有序分组。
 // 空 Group 统一归为「未分类」（在入口归一，保证分组列表、频道列表与频道 ID
 // 三处对空组使用同一名称，ID 才能匹配）。
+// 同组同名重复条目合并为一条频道、多条备用源：配置内嵌频道
+// （lives[].channels）里同名重复是多线路的常见写法，与 M3U 的 Assemble
+// 归并一致；不合并时列表出现两条同 ID，点哪条都解析到最后一条的流，
+// 第一条地址永远播不到。
 func New(channels []config.Channel) *Provider {
 	p := &Provider{byID: make(map[string]int)}
 	seen := map[string]bool{}
-	for i, ch := range channels {
+	for _, ch := range channels {
 		if ch.Group == "" {
 			ch.Group = unclassifiedGroup
-			channels[i] = ch
 		}
 		if !seen[ch.Group] {
 			seen[ch.Group] = true
 			p.groups = append(p.groups, ch.Group)
+		}
+		if i, ok := p.byID[channelID(ch.Group, ch.Name)]; ok {
+			existing := &p.channels[i]
+			existing.URLs = append(existing.URLs, ch.URLs...)
+			if existing.Logo == "" {
+				existing.Logo = ch.Logo
+			}
+			continue
 		}
 		p.byID[channelID(ch.Group, ch.Name)] = len(p.channels)
 		p.channels = append(p.channels, ch)
