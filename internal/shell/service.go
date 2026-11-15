@@ -2367,15 +2367,18 @@ func (s *ShellService) emitPlaybackEvent(ev PlaybackEvent) {
 // 读取当前会话 token 后经 Wails "playback:event" 推给前端；无当前 token 时丢弃。
 // 桥接异常不应影响手动播放，因此事件循环错误只记日志并继续。
 func (s *ShellService) startPlaybackBridge() {
-	if s.player == nil {
+	player := s.player
+	if player == nil {
 		return
 	}
 	emit := s.playbackEventEmitter
 	if emit == nil {
 		emit = s.emitPlaybackEvent
 	}
-	// 信号 channel 与出口都先取到局部变量再交给 goroutine，
-	// 避免 goroutine 与 stop/注入方并发读写 ShellService 字段。
+	// 信号 channel、播放器与出口都先取到局部变量再交给 goroutine，
+	// 避免 goroutine 与 stop/换播放器方并发读写 ShellService 字段。
+	// （之前只取了 stop/emit，goroutine 里还读 s.player.Events()，
+	// RefreshMPV/测试换 player 时写 s.player 就会触发 data race。）
 	stop := make(chan struct{})
 	s.playbackBridgeMu.Lock()
 	s.playbackBridgeStop = stop
@@ -2385,7 +2388,7 @@ func (s *ShellService) startPlaybackBridge() {
 			select {
 			case <-stop:
 				return
-			case ev, ok := <-s.player.Events():
+			case ev, ok := <-player.Events():
 				if !ok {
 					return
 				}
