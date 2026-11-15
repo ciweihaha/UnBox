@@ -798,7 +798,6 @@ func TestPlaybackBridgeFiltersTokenAndStops(t *testing.T) {
 	mu.Unlock()
 }
 
-
 func waitForBridgeEvents(t *testing.T, mu *sync.Mutex, got *[]PlaybackEvent, n int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
