@@ -118,6 +118,7 @@ let vodCategoryRequest = 0
 let vodListRequest = 0
 const vodCategoryLoading = ref(false)
 const vodCategoryError = ref('')
+const vodListError = ref('')
 const livePlaybackPlan = ref<PlaybackPlan | null>(null)
 const vodPlaybackPlan = ref<PlaybackPlan | null>(null)
 const playbackOwner = ref<'live' | 'vod' | null>(null)
@@ -1260,6 +1261,8 @@ function resetVodListState() {
 
 async function reloadVodList(reset = true) {
   if (!activeSite.value || !vodActiveCat.value) return
+  // 新一轮加载清掉上一轮的失败原因：成功后状态区不再留旧报错。
+  vodListError.value = ''
   if (reset) resetVodListState()
   else if (vodListLoading.value) return
   const request = ++vodListRequest
@@ -1282,6 +1285,8 @@ async function reloadVodList(reset = true) {
   } catch (e) {
     if (request === vodListRequest) {
       vodListEnd.value = false
+      // 列表失败的原因留在内容区内明示（底部错误条容易错过），并给重试入口。
+      vodListError.value = String(e)
       if (certErrorHost(String(e))) tlsRetry = () => reloadVodList(reset)
       handleError(e)
     }
@@ -2375,6 +2380,14 @@ onBeforeUnmount(() => {
         </aside>
 
         <section class="vod-main">
+          <!-- 点播列表三态都在内容区内明示，不再静默空白：加载中显示进度，
+               失败显示真实原因并给重试入口，空结果也给重试（源站可能刚恢复）。 -->
+          <p v-if="vodListLoading && !vodListItems.length" class="vod-state" role="status" aria-live="polite">正在加载…</p>
+          <div v-else-if="vodListError && !vodListItems.length" class="vod-state vod-state-error" role="alert">
+            <span>加载失败：{{ vodListError }}</span>
+            <button type="button" class="vod-list-more" @click="reloadVodList()">重新加载</button>
+          </div>
+          <p v-else-if="!vodListItems.length && vodListEnd" class="vod-state" role="status">该分类暂无内容 <button type="button" class="vod-list-more" @click="reloadVodList()">重新加载</button></p>
           <template>
           <ContentCardList
             ref="vodListRef"

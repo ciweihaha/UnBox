@@ -144,3 +144,61 @@ function playerContent(flag, id, vipFlags){ var r = req(%q); return JSON.stringi
 		t.Fatalf("Resolve URL=%q，应为解析出的流地址（沿用了已取消的旧 ctx，导致 VodPlay 失败后退回未解析地址）", stream.URL)
 	}
 }
+
+// 回归测试（第 1 项）：规则脚本纯 JS 死循环（不经过 req）时，BrowseFiltered
+// 也必须在 ctx 超时内返回，而不是让点播列表一直空白。修法：ctx 取消时打断
+// goja 执行；调用结束后再清中断标记，避免残留中断污染下一次调用。
+func TestSpiderBrowseFilteredInterruptsHungRule(t *testing.T) {
+	script := `
+function categoryContent(tid, pg, quick, extend) {
+  while (true) {}
+  return [];
+}
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(script))
+	}))
+	defer srv.Close()
+	p, err := NewSpider(config.Site{Key: "hung", Type: config.SiteTypeSpider, API: srv.URL + "/rule.js"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(timeout time.Duration) (error, time.Duration, bool) {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			_, err := p.BrowseFiltered(ctx, "1", 1, nil)
+			done <- err
+		}()
+		start := time.Now()
+		select {
+		case err := <-done:
+			return err, time.Since(start), false
+		case <-time.After(5 * time.Second):
+			return nil, time.Since(start), true
+		}
+	}
+	err, elapsed, timedOut := call(200 * time.Millisecond)
+	if timedOut {
+		t.Fatalf("死循环规则未在 5s 内返回（ctx 200ms 应已打断它）")
+	}
+	if err == nil {
+		t.Fatal("死循环规则应当在 ctx 超时后报错")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("死循环规则耗时 %v，远超 ctx 超时", elapsed)
+	}
+	// 中断不能污染下一次调用：同站再调一次，应为自己的 ctx 超时而失败，
+	// 而不是被上一次残留的中断立刻打断（耗时应接近自己的超时，而非接近 0）。
+	err, elapsed, timedOut = call(200 * time.Millisecond)
+	if timedOut {
+		t.Fatalf("第二次调用未在 5s 内返回")
+	}
+	if err == nil {
+		t.Fatal("死循环规则第二次调用也应当报错")
+	}
+	if elapsed < 50*time.Millisecond {
+		t.Fatalf("第二次调用耗时仅 %v，疑似被上一次残留的中断立刻打断", elapsed)
+	}
+}

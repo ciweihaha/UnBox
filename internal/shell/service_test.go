@@ -1354,6 +1354,44 @@ func TestVodListFilteredRoutesFilters(t *testing.T) {
 	}
 }
 
+// 阻塞型探针：等 ctx 取消才返回（模拟聚合源串行拉多个子站、规则脚本长
+// 时间执行等永远不返回的源站）；VodListFiltered 必须在整体超时内打断它。
+type blockingProbeProvider struct {
+	provider.Provider
+}
+
+func (p *blockingProbeProvider) BrowseFiltered(ctx context.Context, _ string, _ int, _ map[string]string) (provider.Page, error) {
+	<-ctx.Done()
+	return provider.Page{}, ctx.Err()
+}
+
+func (p *blockingProbeProvider) Browse(ctx context.Context, cat string, page int) (provider.Page, error) {
+	return p.BrowseFiltered(ctx, cat, page, nil)
+}
+
+// 回归测试（第 1 项）：点播列表加载必须有整体超时。源站一直不返回时，
+// 此前 VodListFiltered 用 Background、无任何上限，点播页会一直空白
+// （无加载态、无报错、无重试）；修好后应在超时内返回并说明超时。
+func TestVodListFilteredTimesOut(t *testing.T) {
+	svc := NewShellService(nil, nil, nil)
+	svc.vods = map[string]provider.Provider{"slow": &blockingProbeProvider{}}
+	old := vodListTimeout
+	vodListTimeout = 50 * time.Millisecond
+	defer func() { vodListTimeout = old }()
+	start := time.Now()
+	_, err := svc.VodListFiltered("slow", "1", 1, nil)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("永远不返回的源站应当超时报错")
+	}
+	if !strings.Contains(err.Error(), "超时") {
+		t.Fatalf("超时报错应说明超时，实际: %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("VodListFiltered 超时耗时 %v，远超整体超时", elapsed)
+	}
+}
+
 // 检查更新走网页重定向而不是 API：未登录的 GitHub API 每小时只有 60 次，
 // 被限流时只会 403（用户现场就是这样）。
 func TestLatestReleaseByRedirect(t *testing.T) {
@@ -1410,5 +1448,19 @@ func TestLatestReleaseByAPIRateLimited(t *testing.T) {
 	_, _, _, err := latestReleaseByAPI(srv.Client(), srv.URL)
 	if err == nil || !strings.Contains(err.Error(), "限流") {
 		t.Fatalf("err=%v, 应提示限流", err)
+	}
+}
+
+// 检查更新必须查本 fork 的 releases：上游 teaGod-s/UnBox 已发 v1.0.0，
+// 本 fork 最新是 v0.9.10，查上游会让每个 fork 构建都误报「发现新版本 v1.0.0」。
+func TestUpdateRepoPointsAtFork(t *testing.T) {
+	if updateRepo != "ciweihaha/UnBox" {
+		t.Fatalf("updateRepo=%q, want ciweihaha/UnBox", updateRepo)
+	}
+	if !strings.Contains(updatePageURL, "github.com/ciweihaha/UnBox/releases/latest") {
+		t.Fatalf("updatePageURL=%q", updatePageURL)
+	}
+	if !strings.Contains(updateURL, "api.github.com/repos/ciweihaha/UnBox/releases/latest") {
+		t.Fatalf("updateURL=%q", updateURL)
 	}
 }

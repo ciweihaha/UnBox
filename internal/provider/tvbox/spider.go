@@ -223,7 +223,35 @@ func (p *Spider) Browse(ctx context.Context, cat string, page int) (provider.Pag
 	return p.BrowseFiltered(ctx, cat, page, nil)
 }
 
+// errRuleInterrupted 是打断规则脚本时抛给 goja 的值：ctx 超时后，正在执行
+// 的规则脚本会被它打断并以此报错（上层按 ctx 超时再包一层中文提示）。
+var errRuleInterrupted = errors.New("规则脚本执行超时，已中断")
+
+// interruptOnCancel 在 ctx 取消时打断正在执行的规则脚本；返回的 stop 须在
+// 调用结束时调：它等打断协程退出后再清中断标记，避免残留标记污染下一次调用。
+func (p *Spider) interruptOnCancel(ctx context.Context) func() {
+	done := make(chan struct{})
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		select {
+		case <-ctx.Done():
+			p.engine.Interrupt(errRuleInterrupted)
+		case <-done:
+		}
+	}()
+	return func() {
+		close(done)
+		<-watchDone
+		p.engine.ClearInterrupt()
+	}
+}
+
 func (p *Spider) BrowseFiltered(ctx context.Context, cat string, page int, filters map[string]string) (provider.Page, error) {
+	// 打断哨兵覆盖脚本加载与分类执行全程：纯 JS 死循环不经过 req()，
+	// 光靠 HTTP 超时和上层的整体超时都拦不住它，点播列表会一直空白。
+	stopWatch := p.interruptOnCancel(ctx)
+	defer stopWatch()
 	if err := p.ensureLoaded(ctx); err != nil {
 		return provider.Page{}, err
 	}

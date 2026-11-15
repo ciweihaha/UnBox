@@ -1388,14 +1388,24 @@ func (s *ShellService) VodList(site, cat string, page int) (VodListPage, error) 
 	return s.VodListFiltered(site, cat, page, nil)
 }
 
+// vodListTimeout 是点播列表单次加载的整体上限：聚合源可能串行拉多个子站、
+// 规则脚本可能长时间执行；没有整体上限时调用一直不返回，点播页会一直空白
+// （无加载态、无报错、无重试）。30s 内源站正常都能返回。
+var vodListTimeout = 30 * time.Second
+
 // VodListFiltered 带筛选值浏览分类；filters 可为 nil（等价 VodList）。
 func (s *ShellService) VodListFiltered(site, cat string, page int, filters map[string]string) (VodListPage, error) {
 	pv, err := s.vodOf(site)
 	if err != nil {
 		return VodListPage{}, err
 	}
-	pg, err := pv.BrowseFiltered(context.Background(), cat, page, filters)
+	ctx, cancel := context.WithTimeout(context.Background(), vodListTimeout)
+	defer cancel()
+	pg, err := pv.BrowseFiltered(ctx, cat, page, filters)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || ctx.Err() == context.DeadlineExceeded {
+			return VodListPage{}, errors.New("点播列表加载超时：源站响应过慢，请重试或更换站点")
+		}
 		return VodListPage{}, err
 	}
 	return VodListPage{

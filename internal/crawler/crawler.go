@@ -75,6 +75,25 @@ func (e *Engine) activeCtx() context.Context {
 	return context.Background()
 }
 
+// Interrupt 打断正在执行的规则脚本（goja 中断）：纯 JS 死循环不经过 req()，
+// 光靠 HTTP 超时和上层的整体超时都拦不住它，只能由调用方在 ctx 取消时打断。
+func (e *Engine) Interrupt(v any) {
+	if e == nil || e.vm == nil {
+		return
+	}
+	e.vm.Interrupt(v)
+}
+
+// ClearInterrupt 清除中断标记：调用结束后必须调——若中断恰好在 JS 已结束
+// 时才触发，残留的标记会让下一次规则执行立刻失败（goja 语义）。
+// 调用方须保证此时 JS 已结束、且不会再有并发 Interrupt（见 Spider 的用法）。
+func (e *Engine) ClearInterrupt() {
+	if e == nil || e.vm == nil {
+		return
+	}
+	e.vm.ClearInterrupt()
+}
+
 // New 返回已安装 FongMi多线路 爬虫原语的引擎。
 func New() *Engine {
 	e := &Engine{
