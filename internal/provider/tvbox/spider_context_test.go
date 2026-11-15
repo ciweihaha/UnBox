@@ -163,7 +163,7 @@ function categoryContent(tid, pg, quick, extend) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	call := func(timeout time.Duration) (error, time.Duration, bool) {
+	call := func(timeout time.Duration) (time.Duration, bool, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		done := make(chan error, 1)
@@ -174,12 +174,12 @@ function categoryContent(tid, pg, quick, extend) {
 		start := time.Now()
 		select {
 		case err := <-done:
-			return err, time.Since(start), false
+			return time.Since(start), false, err
 		case <-time.After(5 * time.Second):
-			return nil, time.Since(start), true
+			return time.Since(start), true, nil
 		}
 	}
-	err, elapsed, timedOut := call(200 * time.Millisecond)
+	elapsed, timedOut, err := call(200 * time.Millisecond)
 	if timedOut {
 		t.Fatalf("死循环规则未在 5s 内返回（ctx 200ms 应已打断它）")
 	}
@@ -191,7 +191,7 @@ function categoryContent(tid, pg, quick, extend) {
 	}
 	// 中断不能污染下一次调用：同站再调一次，应为自己的 ctx 超时而失败，
 	// 而不是被上一次残留的中断立刻打断（耗时应接近自己的超时，而非接近 0）。
-	err, elapsed, timedOut = call(200 * time.Millisecond)
+	elapsed, timedOut, err = call(200 * time.Millisecond)
 	if timedOut {
 		t.Fatalf("第二次调用未在 5s 内返回")
 	}
