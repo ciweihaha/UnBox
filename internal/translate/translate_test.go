@@ -3,6 +3,7 @@ package translate
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -106,6 +107,45 @@ func TestTranslateEmptySkipsRequest(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("HTTP 请求次数 = %d，想要 0（空文本不发请求）", calls.Load())
+	}
+}
+
+// 缓存满时只淘汰最旧一批，而不是整库清空：长片看到一半时整库清空，
+// 接下来几百条字幕要全部重新调模型。
+func TestTranslateEvictsOldestInsteadOfClearingAll(t *testing.T) {
+	var calls atomic.Int32
+	srv := mockOllama(t, &calls, "译文", http.StatusOK)
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "qwen2.5:3b", 5*time.Second)
+	ctx := context.Background()
+	for i := 0; i < maxCacheEntries; i++ {
+		if _, err := c.Translate(ctx, fmt.Sprintf("line-%04d", i)); err != nil {
+			t.Fatalf("填缓存第 %d 条失败: %v", i, err)
+		}
+	}
+	if calls.Load() != maxCacheEntries {
+		t.Fatalf("HTTP 请求次数 = %d，想要 %d", calls.Load(), maxCacheEntries)
+	}
+	// 再翻一条，触发淘汰。
+	if _, err := c.Translate(ctx, "line-new"); err != nil {
+		t.Fatalf("第 %d 条失败: %v", maxCacheEntries+1, err)
+	}
+	// 最旧的一条已被淘汰：再翻要重新请求。
+	before := calls.Load()
+	if _, err := c.Translate(ctx, "line-0000"); err != nil {
+		t.Fatalf("重翻最旧条失败: %v", err)
+	}
+	if calls.Load() != before+1 {
+		t.Fatalf("最旧条未被淘汰（请求次数 %d，想要 %d）", calls.Load(), before+1)
+	}
+	// 较新的一条仍在缓存：不再请求。
+	before = calls.Load()
+	if _, err := c.Translate(ctx, fmt.Sprintf("line-%04d", maxCacheEntries-1)); err != nil {
+		t.Fatalf("重翻最新条失败: %v", err)
+	}
+	if calls.Load() != before {
+		t.Fatalf("最新条被误淘汰（请求次数 %d，想要 %d）", calls.Load(), before)
 	}
 }
 

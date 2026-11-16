@@ -25,9 +25,9 @@ const DefaultEndpoint = "http://127.0.0.1:11434"
 // 加载约 2.3GB 内存，字幕短句在 GPU 上约 0.5 秒/条、纯 CPU 约 1–2 秒/条。
 const DefaultModel = "qwen2.5:3b"
 
-// maxCacheEntries 是翻译缓存上限：字幕去重后条目有限，超了就清空重记，
-// 避免长片看下来缓存无限膨胀。
+// maxCacheEntries 是翻译缓存上限；evictBatch 是满时一次淘汰的最旧条数。
 const maxCacheEntries = 500
+const evictBatch = 100
 
 // systemPrompt 要求模型只输出译文：短句翻译不需要解释，
 // 解释性文字会直接混进字幕显示出来。
@@ -142,8 +142,12 @@ func (c *Client) Translate(ctx context.Context, text string) (string, error) {
 
 	c.mu.Lock()
 	if len(c.order) >= maxCacheEntries {
-		c.cache = make(map[string]string, maxCacheEntries)
-		c.order = c.order[:0]
+		// FIFO 淘汰最旧一批，而不是整库清空——长片看到一半时整库清空，
+		// 接下来几百条字幕要全部重新调模型。
+		for _, old := range c.order[:evictBatch] {
+			delete(c.cache, old)
+		}
+		c.order = append([]string(nil), c.order[evictBatch:]...)
 	}
 	if _, ok := c.cache[text]; !ok {
 		c.order = append(c.order, text)
