@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -27,6 +28,18 @@ func TestXYQResolveMacPlayerEscapedURL(t *testing.T) {
 	want := "https://cdn.example.com/2022/a/index.m3u8"
 	if stream.URL != want {
 		t.Fatalf("Resolve = %q，期望解出转义 m3u8 %q", stream.URL, want)
+	}
+}
+
+// 超长字段值（加密串）不能被截断：截断后的残值无法解析。
+func TestMacPlayerFieldLongValue(t *testing.T) {
+	long := strings.Repeat("a", 1500)
+	page := `var player_aaaa={"flag":"play","url":"` + long + `","from":"vxdev"}`
+	if got := macPlayerField(page, "url"); got != long {
+		t.Fatalf("macPlayerField(url) 长度 %d，期望 %d（值被截断）", len(got), len(long))
+	}
+	if got := macPlayerField(page, "from"); got != "vxdev" {
+		t.Fatalf("macPlayerField(from) = %q，期望 vxdev", got)
 	}
 }
 

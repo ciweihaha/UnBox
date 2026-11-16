@@ -447,8 +447,9 @@ func macPlayerField(page, field string) string {
 	if i < 0 {
 		return ""
 	}
-	start := i + len(marker)
-	rest := page[start:minInt(len(page), start+1024)]
+	// 不设长度上限：值以闭合引号为准；超长加密串被截断后无法解析，
+	// 残值比空值更有害。最坏扫到页尾，一次线性扫描。
+	rest := page[i+len(marker):]
 	var b strings.Builder
 	for j := 0; j < len(rest); j++ {
 		if rest[j] == '"' {
