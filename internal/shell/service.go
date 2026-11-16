@@ -1940,20 +1940,80 @@ func latestReleaseByAPI(client *http.Client, apiURL string) (tag, htmlURL string
 }
 
 // compareVersion 简单语义化版本比较：a>b 返回 1，a<b 返回 -1，相等返回 0。
+// 缺失的段按 0 算（"1.0" == "1.0.0"）；预发布版小于正式版
+// （"1.0.0-beta" < "1.0.0"）；构建元数据（"+" 之后）不参与比较。
 func compareVersion(a, b string) int {
 	trim := func(s string) string {
 		return strings.TrimPrefix(strings.TrimSpace(s), "v")
 	}
-	as := strings.Split(trim(a), ".")
-	bs := strings.Split(trim(b), ".")
-	for i := 0; i < len(as) && i < len(bs); i++ {
-		ai, _ := strconv.Atoi(as[i])
-		bi, _ := strconv.Atoi(bs[i])
+	splitCore := func(s string) (core, pre string) {
+		if i := strings.Index(s, "+"); i >= 0 {
+			s = s[:i]
+		}
+		if i := strings.Index(s, "-"); i >= 0 {
+			return s[:i], s[i+1:]
+		}
+		return s, ""
+	}
+	acore, apre := splitCore(trim(a))
+	bcore, bpre := splitCore(trim(b))
+	as := strings.Split(acore, ".")
+	bs := strings.Split(bcore, ".")
+	for i := 0; i < len(as) || i < len(bs); i++ {
+		var ai, bi int
+		if i < len(as) {
+			ai, _ = strconv.Atoi(as[i])
+		}
+		if i < len(bs) {
+			bi, _ = strconv.Atoi(bs[i])
+		}
 		if ai != bi {
 			if ai > bi {
 				return 1
 			}
 			return -1
+		}
+	}
+	// 核心段相等：无预发布 > 有预发布；都有预发布时按标识逐段比。
+	if apre == bpre {
+		return 0
+	}
+	if apre == "" {
+		return 1
+	}
+	if bpre == "" {
+		return -1
+	}
+	return comparePrerelease(apre, bpre)
+}
+
+// comparePrerelease 按 semver 规则比较预发布标识：数字标识按数值比、
+// 数字小于字母、字母按字典序；前者是后者前缀时段数少的更小。
+func comparePrerelease(a, b string) int {
+	as := strings.Split(a, ".")
+	bs := strings.Split(b, ".")
+	for i := 0; i < len(as) && i < len(bs); i++ {
+		ai, aErr := strconv.Atoi(as[i])
+		bi, bErr := strconv.Atoi(bs[i])
+		switch {
+		case aErr == nil && bErr == nil:
+			if ai != bi {
+				if ai > bi {
+					return 1
+				}
+				return -1
+			}
+		case aErr == nil:
+			return -1 // 数字标识小于字母标识
+		case bErr == nil:
+			return 1
+		default:
+			if as[i] != bs[i] {
+				if as[i] > bs[i] {
+					return 1
+				}
+				return -1
+			}
 		}
 	}
 	if len(as) > len(bs) {

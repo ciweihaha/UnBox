@@ -1464,3 +1464,27 @@ func TestUpdateRepoPointsAtFork(t *testing.T) {
 		t.Fatalf("updateURL=%q", updateURL)
 	}
 }
+
+// compareVersion 按语义化版本比较：缺失的段按 0 算，预发布版小于正式版。
+func TestCompareVersion(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"v0.9.10", "0.9.9", 1},
+		{"0.9.10", "v0.9.10", 0},
+		{"1.0", "1.0.0", 0},
+		{"1.0.0", "1.0", 0},
+		{"1.0.0-beta", "1.0.0", -1},
+		{"1.0.0", "1.0.0-beta", 1},
+		{"1.0.0-alpha", "1.0.0-beta", -1},
+		{"1.0.0-alpha.1", "1.0.0-alpha", 1},
+		{"1.0.0+build", "1.0.0", 0},
+		{"2.0", "10.0", -1},
+	}
+	for _, c := range cases {
+		if got := compareVersion(c.a, c.b); got != c.want {
+			t.Errorf("compareVersion(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
+		}
+	}
+}
