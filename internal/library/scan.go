@@ -11,8 +11,9 @@ import (
 // videoExts 是被识别的视频容器扩展名（D5 白名单）。
 var videoExts = map[string]bool{
 	"mp4": true, "mkv": true, "m4v": true, "mov": true, "avi": true,
-	"flv": true, "ts": true, "m2ts": true, "wmv": true, "rmvb": true,
+	"flv": true, "ts": true, "m2ts": true, "mts": true, "wmv": true, "rmvb": true,
 	"rm": true, "webm": true, "mpg": true, "mpeg": true, "3gp": true, "vob": true,
+	"f4v": true, "divx": true,
 }
 
 // scanDir 递归扫描 root 下的视频文件，返回规范化条目。

@@ -22,12 +22,15 @@ func TestScanDirFiltersAndRecurses(t *testing.T) {
 	mustWrite("sub/c.txt")
 	mustWrite("sub/d.srt")
 	mustWrite("deep/e.webm")
+	mustWrite("sub/f.mts")
+	mustWrite("sub/g.f4v")
+	mustWrite("sub/h.divx")
 
 	items, err := scanDir(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 3 {
+	if len(items) != 6 {
 		t.Fatalf("items=%+v", items)
 	}
 	seen := map[string]bool{}
@@ -40,7 +43,7 @@ func TestScanDirFiltersAndRecurses(t *testing.T) {
 			t.Fatalf("item.Dir=%q, want parent of %q", item.Dir, item.Path)
 		}
 	}
-	for _, ext := range []string{"mp4", "mkv", "webm"} {
+	for _, ext := range []string{"mp4", "mkv", "webm", "mts", "f4v", "divx"} {
 		if !seen[ext] {
 			t.Fatalf("缺扩展名 %s: %+v", ext, items)
 		}
