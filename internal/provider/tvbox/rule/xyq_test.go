@@ -111,6 +111,30 @@ func TestParseXYQJSONC(t *testing.T) {
 	}
 }
 
+// 行尾 // 注释也要去掉，但字符串里的 //（如 URL）必须保留。
+func TestStripJSONCCommentsTrailing(t *testing.T) {
+	const raw = `{
+  "分类名称": "电影&剧集", // 行尾甲
+  "分类链接": "https://wogg.net/vodshow/{cateId}.html", // 行尾乙
+  // 整行丙
+  "规则名": "玩偶哥哥" // 行尾丁
+}`
+	clean := stripJSONCComments([]byte(raw))
+	if strings.Contains(string(clean), "行尾甲") || strings.Contains(string(clean), "行尾乙") || strings.Contains(string(clean), "行尾丁") || strings.Contains(string(clean), "整行丙") {
+		t.Fatalf("注释未去掉干净: %s", clean)
+	}
+	if !strings.Contains(string(clean), "https://wogg.net/vodshow/{cateId}.html") {
+		t.Fatalf("字符串里的 // 被误伤: %s", clean)
+	}
+	r, err := ParseXYQ(clean)
+	if err != nil {
+		t.Fatalf("去注释后解析失败: %v", err)
+	}
+	if r.CategoryNames != "电影&剧集" {
+		t.Fatalf("解析结果异常: %+v", r)
+	}
+}
+
 func TestParseXYQRejectsEmpty(t *testing.T) {
 	if _, err := ParseXYQ([]byte(`{"分类链接":""}`)); err == nil {
 		t.Fatal("缺少分类链接应报错")

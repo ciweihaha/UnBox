@@ -110,8 +110,8 @@ func ParseXYQ(data []byte) (*XYQ, error) {
 	return &r, nil
 }
 
-// stripJSONCComments 逐行去掉行首 // 注释（规则文件里层内注释不能删，
-// 例如 URL 里的 "https://"）。
+// stripJSONCComments 逐行去掉 // 注释（行首与行尾）：只认字符串外的 //，
+// URL 里的 "https://" 不动。JSON 字符串不能跨行，逐行扫描即可。
 func stripJSONCComments(data []byte) []byte {
 	var out []byte
 	for len(data) > 0 {
@@ -121,15 +121,45 @@ func stripJSONCComments(data []byte) []byte {
 		} else {
 			data = nil
 		}
-		trimmed := strings.TrimLeftFunc(string(line), func(r rune) bool {
-			return r == ' ' || r == '\t' || r == '\r'
-		})
-		if strings.HasPrefix(trimmed, "//") {
-			continue
+		if cut := commentStart(line); cut >= 0 {
+			line = line[:cut]
+			if len(strings.TrimSpace(string(line))) == 0 {
+				continue // 整行注释：整行丢掉
+			}
+			// 行尾注释去掉后补换行，避免两行粘连。
+			line = append(line, '\n')
 		}
 		out = append(out, line...)
 	}
 	return out
+}
+
+// commentStart 返回行内字符串外的第一个 // 位置；没有返回 -1。
+// 扫描时跳过字符串内容（\" 转义也算在内），"https://" 这类不触发。
+func commentStart(line []byte) int {
+	inStr := false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if inStr {
+			if c == '\\' {
+				i++
+				continue
+			}
+			if c == '"' {
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '/':
+			if i+1 < len(line) && line[i+1] == '/' {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func indexByte(b []byte, c byte) int {
