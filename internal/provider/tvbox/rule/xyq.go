@@ -516,8 +516,12 @@ func (e *XYQHikerEngine) parseHTMLItems(doc *goquery.Document, kind, array, titl
 		if logo != "" {
 			logo = e.absURL(withPrefixSuffix(logo, prefix, suffix))
 		}
+		id := e.absURL(withPrefixSuffix(href, prefix, suffix))
+		if id == "" {
+			id = name // 无链接时以标题兜底 id，仍可进详情尝试（与 JSON 路径一致）
+		}
 		out = append(out, provider.Item{
-			ID:    e.absURL(withPrefixSuffix(href, prefix, suffix)),
+			ID:    id,
 			Title: name,
 			Logo:  logo,
 			Group: sub,

@@ -191,6 +191,19 @@ func TestXYQBrowse(t *testing.T) {
 	}
 }
 
+// 搜索无链接时 ID 以标题兜底（与 JSON 路径一致），否则点进详情是空 ID。
+func TestParseHTMLItemsSearchNoLinkFallsBackToTitle(t *testing.T) {
+	e := NewXYQHikerEngine(&XYQ{HomeURL: "https://example.com"}, NewClient(nil))
+	doc := e.newDoc(`<html><body><div class="items"><div class="item"><h3>无链片名</h3></div></div></body></html>`)
+	items := e.parseHTMLItems(doc, "搜索", ".items&&.item", "h3&&Text", "h3&&a&&href", "", "", "", "")
+	if len(items) != 1 {
+		t.Fatalf("items = %#v，期望保留 1 条", items)
+	}
+	if items[0].ID != "无链片名" {
+		t.Fatalf("ID = %q，期望以标题兜底", items[0].ID)
+	}
+}
+
 func TestXYQSearch(t *testing.T) {
 	e, srv := xyqFixture(t)
 	defer srv.Close()
