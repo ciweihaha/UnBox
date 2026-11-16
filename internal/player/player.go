@@ -156,12 +156,14 @@ const (
 	EventError                      // 播放出错，Err 非空
 	EventEOF                        // 播放自然结束
 	EventPlaying                    // 已开始或恢复播放
+	EventDuration                   // 总时长已知/变化，携带 Duration（秒；0 表示未知）
 )
 
 // Event 是播放器上报的异步事件。
 type Event struct {
 	Kind     EventKind
 	Position float64
+	Duration float64 // 秒；仅 EventDuration 携带，其余事件为 0
 	Err      error
 }
 

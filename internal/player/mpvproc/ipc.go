@@ -94,6 +94,12 @@ func parseEvent(line []byte) (player.Event, bool) {
 			return player.Event{}, false
 		}
 		return player.Event{Kind: player.EventPosition, Position: f}, true
+	case raw.Event == "property-change" && raw.Name == "duration":
+		f, err := strconv.ParseFloat(string(raw.Data), 64)
+		if err != nil {
+			return player.Event{}, false
+		}
+		return player.Event{Kind: player.EventDuration, Duration: f}, true
 	case raw.Event == "property-change" && raw.Name == "paused-for-cache":
 		var paused *bool
 		if err := json.Unmarshal(raw.Data, &paused); err != nil || paused == nil {

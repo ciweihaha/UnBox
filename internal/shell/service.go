@@ -2413,6 +2413,7 @@ type PlaybackEvent struct {
 	Token    uint64
 	Kind     string
 	Position float64
+	Duration float64
 	Error    string
 }
 
@@ -2427,6 +2428,8 @@ func playbackEventFor(ev player.Event, token uint64) (PlaybackEvent, bool) {
 		kind = "buffering"
 	case player.EventPosition:
 		kind = "position"
+	case player.EventDuration:
+		kind = "duration"
 	case player.EventError:
 		kind = "error"
 	case player.EventEOF:
@@ -2438,7 +2441,7 @@ func playbackEventFor(ev player.Event, token uint64) (PlaybackEvent, bool) {
 	if ev.Err != nil {
 		errMsg = ev.Err.Error()
 	}
-	return PlaybackEvent{Token: token, Kind: kind, Position: ev.Position, Error: errMsg}, true
+	return PlaybackEvent{Token: token, Kind: kind, Position: ev.Position, Duration: ev.Duration, Error: errMsg}, true
 }
 
 // currentPlaybackToken 返回当前点播会话 token；0 表示无会话。

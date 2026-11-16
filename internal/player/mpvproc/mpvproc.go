@@ -140,11 +140,12 @@ func (p *mpvProc) Load(ctx context.Context, s player.Stream) error {
 
 	go p.readLoop(conn, sess)
 
-	// 观察位置、缓存暂停状态与用户暂停。观察失败不影响播放，故忽略错误。
+	// 观察位置、总时长、缓存暂停状态与用户暂停。观察失败不影响播放，故忽略错误。
 	// pause 只用来屏蔽暂停期间的缓存事件，不会自己映射成缓冲信号。
 	_ = p.send("observe_property", 0, "time-pos")
 	_ = p.send("observe_property", 1, "paused-for-cache")
 	_ = p.send("observe_property", 2, "pause")
+	_ = p.send("observe_property", 3, "duration")
 	return nil
 }
 
@@ -421,6 +422,8 @@ func (p *mpvProc) readLoop(conn io.ReadWriteCloser, sess int64) {
 				switch evt.Kind {
 				case player.EventPosition:
 					p.state.Position = evt.Position
+				case player.EventDuration:
+					p.state.Duration = evt.Duration
 				case player.EventBuffering:
 					// 暂停期间的缓存状态变化不对外播报，否则会被前端当成
 					// 「未起播/持续缓冲」而触发自动换源。

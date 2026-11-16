@@ -706,6 +706,8 @@ func TestPlaybackEventMapping(t *testing.T) {
 			PlaybackEvent{Token: 1, Kind: "buffering"}},
 		{"position", player.Event{Kind: player.EventPosition, Position: 8.25}, 17,
 			PlaybackEvent{Token: 17, Kind: "position", Position: 8.25}},
+		{"duration", player.Event{Kind: player.EventDuration, Duration: 1500.5}, 17,
+			PlaybackEvent{Token: 17, Kind: "duration", Duration: 1500.5}},
 		{"error", player.Event{Kind: player.EventError, Err: errors.New("boom")}, 3,
 			PlaybackEvent{Token: 3, Kind: "error", Error: "boom"}},
 		{"ended", player.Event{Kind: player.EventEOF}, 4,

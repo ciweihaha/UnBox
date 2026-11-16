@@ -265,6 +265,14 @@ describe('App 播放事件接线', () => {
     expect(app).toContain('skip-notice')
   })
 
+  // mpv 总时长经 playback:event 的 duration 事件桥接过来：片尾跳过用真实
+  // 总时长 Seek，而不是一律 Seek(1e9)。
+  it('mpv 总时长经 duration 事件更新，片尾跳过用真实总时长', () => {
+    expect(app).toContain("case 'duration':")
+    expect(app).toContain('vodPlaybackDuration.value = data.Duration')
+    expect(app).toContain('vodPlaybackDuration.value > 0 ? vodPlaybackDuration.value : 1e9')
+  })
+
   // 切集时清空 plan 会卸载 <video>，导致全屏退出、画面黑屏且新流不自动播放。
   it('切换剧集时不预先清空 web 播放计划', () => {
     expect(app).toContain("if (vodPlaybackPlan.value?.Backend !== 'web') vodPlaybackPlan.value = null")

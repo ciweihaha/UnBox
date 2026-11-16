@@ -34,13 +34,15 @@ func TestEncodeSetProperty(t *testing.T) {
 
 func TestParseEvent(t *testing.T) {
 	tests := []struct {
-		name  string
-		input string
-		kind  player.EventKind
+		name     string
+		input    string
+		kind     player.EventKind
+		duration float64
 	}{
 		{name: "cache start", input: `{"event":"property-change","name":"paused-for-cache","data":true}`, kind: player.EventBuffering},
 		{name: "cache end", input: `{"event":"property-change","name":"paused-for-cache","data":false}`, kind: player.EventPlaying},
 		{name: "position", input: `{"event":"property-change","name":"time-pos","data":12.5}`, kind: player.EventPosition},
+		{name: "duration", input: `{"event":"property-change","name":"duration","data":1500.5}`, kind: player.EventDuration, duration: 1500.5},
 		{name: "eof", input: `{"event":"end-file","reason":"eof"}`, kind: player.EventEOF},
 		{name: "error", input: `{"event":"end-file","reason":"error"}`, kind: player.EventError},
 	}
@@ -53,7 +55,15 @@ func TestParseEvent(t *testing.T) {
 			if tt.kind == player.EventError && evt.Err == nil {
 				t.Fatal("end-file error should carry an error")
 			}
+			if tt.kind == player.EventDuration && evt.Duration != tt.duration {
+				t.Fatalf("parseEvent duration = %v, want %v", evt.Duration, tt.duration)
+			}
 		})
+	}
+
+	// 总时长未知时 mpv 发 data:null，不应误报成 0 秒的 duration 事件。
+	if _, ok := parseEvent([]byte(`{"event":"property-change","name":"duration","data":null}`)); ok {
+		t.Fatal("duration 为 null 时不应产生事件")
 	}
 
 	// 普通 pause 属性不是缓冲信号，避免把用户主动暂停误报成缓冲。

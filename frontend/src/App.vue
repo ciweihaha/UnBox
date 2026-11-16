@@ -1777,13 +1777,17 @@ function onVodPlaybackSignal(token: number, state: PlaybackState, message?: stri
 // onPlaybackEvent 消费后端桥接的 mpv 事件：只接受与当前点播 token 一致的事件，
 // 旧会话的事件一律丢弃。
 function onPlaybackEvent(payload: unknown) {
-  const data = payload as { Token?: number; Kind?: string; Position?: number } | null | undefined
+  const data = payload as { Token?: number; Kind?: string; Position?: number; Duration?: number } | null | undefined
   const token = data?.Token
   if (!token || token !== vodPlaybackToken.value || !isCurrentPlayback('vod', token)) return
   switch (data?.Kind) {
     case 'position':
       vodPlaybackPosition.value = data.Position ?? vodPlaybackPosition.value
       applySkip(token)
+      break
+    case 'duration':
+      // mpv 总时长：片尾跳过与片尾标记显示都用它；未知时保持 0。
+      if (data.Duration && data.Duration > 0) vodPlaybackDuration.value = data.Duration
       break
     case 'playing':
     case 'buffering':
@@ -1829,8 +1833,10 @@ function applySkip(token: number) {
   vodSkipRuntime = { ...vodSkipRuntime, outroSkipped: true }
   // 跳到结尾以触发 ended → 自动切集。总时长未知（HLS 常见 Infinity）时给一个
   // 超大目标值，由播放器钳到结尾，而不是用当前位置（那等于没跳）。
-  if (isWeb) pendingSeek.value = vodPlaybackDuration.value > 0 ? vodPlaybackDuration.value : 1e9
-  else void ShellService.Seek(1e9).catch(() => {})
+  // mpv 以前总时长未知，只能 Seek(1e9)；现在 duration 事件到了就用真实总时长。
+  const endTarget = vodPlaybackDuration.value > 0 ? vodPlaybackDuration.value : 1e9
+  if (isWeb) pendingSeek.value = endTarget
+  else void ShellService.Seek(endTarget).catch(() => {})
   showSkipNotice('已跳过片尾')
 }
 
