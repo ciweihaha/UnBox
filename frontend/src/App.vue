@@ -16,6 +16,7 @@ import { imgError, scrollxEnter, scrollxLeave } from './contentListDom'
 import { createPlaybackSettings, PLAYBACK_SETTING_ITEMS, type PlaybackSettingKey, type PlaybackSettingsApi } from './playbackSettings'
 import { createSubtitleTranslator, type TranslateSubtitleApi } from './subtitleTranslate'
 import { createTranslateSettings, type TranslateSettingsApi } from './translateSettings'
+import { createLiveSubtitleSettings, type LiveSubtitleSettingsApi } from './liveSubtitleSettings'
 import { VodAutomation, nextEpisodeInSource, sameNameEpisodeOnSource, type VodAutomationHost } from './playbackAutomation'
 import { resolveSkipAction, type SkipRuntime, type VodSkipMarks } from './vodSkip'
 import { initializeHomeState } from './startup'
@@ -298,6 +299,32 @@ const translateModelMsg = ref('')
 async function checkTranslateModel() {
   const ok = await translateSettingsStore.checkModel()
   translateModelMsg.value = ok ? '本地模型就绪，可以开字幕翻译' : ''
+}
+
+// 直播实时字幕：Whisper 听写英文 + 同一个 Ollama 模型翻中文，默认关。
+// 后端在切台时自动启停；前端只负责收字幕事件、抓音频、清残留。
+const liveSubtitleSettingsStore = createLiveSubtitleSettings(
+  ShellService as unknown as LiveSubtitleSettingsApi,
+  (e) => handleError(e),
+)
+const liveSubtitleSettings = liveSubtitleSettingsStore.settings
+const liveSubtitleText = ref('')
+const liveSubtitleStatusMsg = ref('')
+const liveAudioPusher = {
+  pushLiveAudioChunk: (b64: string) => ShellService.PushLiveAudioChunk(b64),
+}
+function toggleLiveSubtitleSetting(value: boolean) {
+  void liveSubtitleSettingsStore.setEnabled(value)
+  if (!value) liveSubtitleText.value = ''
+}
+async function refreshLiveSubtitleStatus() {
+  const st = await liveSubtitleSettingsStore.status()
+  if (!st) return
+  liveSubtitleStatusMsg.value = st.Running
+    ? `直播字幕运行中，最近延迟约 ${(st.LastLatencyMs / 1000).toFixed(1)} 秒`
+    : st.Error
+      ? `直播字幕异常：${st.Error}`
+      : '直播字幕未启动'
 }
 
 const cardContextMenu = ref<{
@@ -687,7 +714,7 @@ async function switchMode(m: 'home' | 'vod' | 'live' | 'library' | 'search' | 'f
   }
   else if (m === 'home') { navScrolled.value = false; await refreshHome() }
   else if (m === 'library') { await loadLibrary(); await refreshHome() }
-  else if (m === 'settings') { await reloadSourceHistory(); await reloadInsecureTLSHosts(); await refreshLogs(); await loadSearchThreads(); await loadSearchCacheTTL(); await playbackSettingsStore.load(); await translateSettingsStore.load() }
+  else if (m === 'settings') { await reloadSourceHistory(); await reloadInsecureTLSHosts(); await refreshLogs(); await loadSearchThreads(); await loadSearchCacheTTL(); await playbackSettingsStore.load(); await translateSettingsStore.load(); await liveSubtitleSettingsStore.load() }
 }
 
 async function refreshHome() {
@@ -1143,6 +1170,8 @@ async function play(c: ChannelInfo) {
   livePlaybackStatus.value = 'preparing'
   livePlaybackError.value = ''
   liveNowPlaying.value = c.Name
+  // 切台清掉上一条直播字幕，免得新台还顶着旧台的句子。
+  liveSubtitleText.value = ''
   // 切频道反馈走瞬态 toast（不再常驻播放器上方）；并高亮左侧该频道所属分类，
   // 抵消频道列表去掉分类名后丢失的归属信息。列表内容保持不变，只移动高亮。
   flashLiveToast(`正在切换频道：${c.Name}`)
@@ -2077,6 +2106,13 @@ onMounted(() => {
   })
   // mpv 播放事件由后端带 token 桥接过来；onPlaybackEvent 只接受当前点播会话的事件。
   Events.On('playback:event', (ev: any) => onPlaybackEvent(ev?.data))
+  // 直播实时字幕：后端推译文，前端只显示；切台时后端会清残留，这里也清。
+  Events.On('live-subtitle', (ev: any) => {
+    const data = ev.data as { Text?: string; LatencyMs?: number } | undefined
+    if (typeof data?.Text === 'string' && data.Text.trim() !== '') {
+      liveSubtitleText.value = data.Text
+    }
+  })
   setInterval(pollMpvProgress, 10000)
 })
 
@@ -2282,7 +2318,7 @@ onBeforeUnmount(() => {
       <aside class="player">
         <p v-if="liveNowPlaying" class="now">正在播放：{{ liveNowPlaying }}</p>
         <p v-if="livePlaybackStatus === 'error'" class="playback-error" aria-live="assertive">频道播放失败：{{ livePlaybackError }}</p>
-        <PlaybackView :plan="livePagePlaybackPlan" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" @fallback="(id, position) => fallbackToMpv('live', id, livePlaybackToken, position)" />
+        <PlaybackView :plan="livePagePlaybackPlan" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" :live-subtitle="liveSubtitleText" :live-subtitle-enabled="liveSubtitleSettings.Enabled" :live-audio-pusher="liveAudioPusher" @fallback="(id, position) => fallbackToMpv('live', id, livePlaybackToken, position)" />
       </aside>
 
       <section class="channels">
@@ -2518,6 +2554,20 @@ onBeforeUnmount(() => {
           <label>地址 <input v-model="translateEndpoint" type="text" placeholder="http://127.0.0.1:11434" /></label>
         </div>
         <p v-if="translateModelMsg" class="home-empty">{{ translateModelMsg }}</p>
+      </section>
+
+      <section class="src-section">
+        <h3>直播实时字幕</h3>
+        <p class="home-empty">看直播时把英文说话实时听写并翻成中文显示（Whisper 听写 + 同一个 Ollama 模型翻译；首次使用会下载识别程序与模型并缓存，不打进安装包）。</p>
+        <div class="settings-personalize">
+          <button type="button" class="settings-choice" :class="{ active: liveSubtitleSettings.Enabled }" title="开启后，看英文直播时画面下方实时出中文字幕" :aria-pressed="liveSubtitleSettings.Enabled" @click="toggleLiveSubtitleSetting(!liveSubtitleSettings.Enabled)">直播实时字幕：{{ liveSubtitleSettings.Enabled ? '开' : '关' }}</button>
+          <button type="button" class="settings-choice" @click="refreshLiveSubtitleStatus">查看状态</button>
+        </div>
+        <div v-if="liveSubtitleSettings.Enabled" class="src-add">
+          <label>识别模型 <input v-model="liveSubtitleSettings.WhisperModel" type="text" placeholder="base.en" @change="() => liveSubtitleSettingsStore.setWhisperModel(liveSubtitleSettings.WhisperModel)" /></label>
+          <label>窗口（秒） <input v-model.number="liveSubtitleSettings.WindowSeconds" type="number" min="1" max="5" step="0.5" @change="() => liveSubtitleSettingsStore.setWindowSeconds(liveSubtitleSettings.WindowSeconds)" /></label>
+        </div>
+        <p v-if="liveSubtitleStatusMsg" class="home-empty">{{ liveSubtitleStatusMsg }}</p>
       </section>
 
       <section class="src-section">

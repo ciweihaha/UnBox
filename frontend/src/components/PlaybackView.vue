@@ -4,6 +4,7 @@ import Hls, { type ErrorData, type Events } from 'hls.js'
 import mpegts from 'mpegts.js'
 import { useHlsTracks, type TrackState } from '../useHlsTracks'
 import { activeCueText } from '../subtitleTranslate'
+import { LiveAudioCapture, type LiveAudioPusher } from '../liveAudio'
 import type { VodSkipMarks } from '../vodSkip'
 import TrackMenu from './TrackMenu.vue'
 
@@ -32,6 +33,12 @@ const props = defineProps<{
   translateEnabled?: boolean
   /** 逐条翻译函数（App 注入，内部带缓存与失败回退原文）；不传表示不翻译。 */
   translateText?: (text: string) => Promise<string>
+  /** 直播实时字幕当前文本（App 经 live-subtitle 事件注入）；有值时显示在画面上。 */
+  liveSubtitle?: string
+  /** 直播实时字幕开关（设置页「直播实时字幕」）；开时抓 <video> 的声音做识别。 */
+  liveSubtitleEnabled?: boolean
+  /** 直播音频推送入口（App 注入，对应后端 PushLiveAudioChunk）；不传不抓音频。 */
+  liveAudioPusher?: LiveAudioPusher
 }>()
 const emit = defineEmits<{
   fallback: [id: string, position: number]
@@ -51,6 +58,10 @@ const translatedSubtitle = ref('')
 let translationSeq = 0
 const hiddenSubtitleTracks = new Set<TextTrack>()
 const boundCueTracks = new Map<TextTrack, () => void>()
+// 直播实时字幕音频抓取：同一 <video> 只能建一次 MediaElementSource，
+// 因此 LiveAudioCapture 实例随 video 元素只建一次，开关只接/断分流。
+let liveCapture: LiveAudioCapture | null = null
+const liveCaptureError = ref('')
 // 画面旋转角度（度），90/270 时按容器比例缩放，避免旋转后画面被裁掉。
 const rotation = ref(0)
 // 自绘播放控件状态：原生 controls 会跟着画面一起旋转，且全屏时无法与工具按钮共存。
@@ -179,6 +190,33 @@ function applyTranslationMode() {
   restoreHiddenTracks()
 }
 
+// maybeStartLiveCapture：直播实时字幕开着、Web 播放、video 就绪时开始抓音频。
+// 抓取失败只记一条错误（显示在播放器下方），不挡播放。
+async function maybeStartLiveCapture(): Promise<void> {
+  if (!props.liveSubtitleEnabled || !props.liveAudioPusher) return
+  if (props.plan?.Backend !== 'web') return
+  const element = video.value
+  if (!element) return
+  if (liveCapture?.running) return
+  if (!liveCapture) {
+    liveCapture = new LiveAudioCapture(element, props.liveAudioPusher, (msg) => {
+      liveCaptureError.value = msg
+    })
+  }
+  await liveCapture.start()
+}
+
+// stopLiveCapture 断开音频抓取（切台/停播/关开关时调用）；
+// destroyLiveCapture 在组件卸载时彻底释放。
+function stopLiveCapture(): void {
+  liveCapture?.stop()
+}
+
+function destroyLiveCapture(): void {
+  liveCapture?.destroy()
+  liveCapture = null
+}
+
 function cleanup() {
   attachGeneration++
   trackState.value?.detach(); trackState.value = null
@@ -192,6 +230,7 @@ function cleanup() {
   translatedSubtitle.value = ''
   unbindTranslationTracks()
   restoreHiddenTracks()
+  stopLiveCapture()
   clearHideTimer()
   if (clickTimer !== null) {
     clearTimeout(clickTimer)
@@ -309,6 +348,7 @@ function onPlay(): void {
   seeking.value = false
   emit('playback', 'playing')
   scheduleHideControls()
+  void maybeStartLiveCapture()
 }
 
 function onPause(): void {
@@ -641,6 +681,11 @@ watch(() => props.translateEnabled, () => {
   bindAllTranslationTracks()
   applyTranslationMode()
 })
+// 直播实时字幕开关变化：开时开始抓音频、关时断开。
+watch(() => props.liveSubtitleEnabled, (enabled) => {
+  if (enabled) void maybeStartLiveCapture()
+  else stopLiveCapture()
+})
 // 用户切字幕轨：hls.js 会把新轨设为 showing，翻译开着就立刻藏起来防重影。
 watch(() => trackState.value?.currentSubtitle, () => {
   bindAllTranslationTracks()
@@ -665,6 +710,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', onDocumentClick)
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   window.removeEventListener('resize', applyRotation)
+  destroyLiveCapture()
   cleanup()
 })
 </script>
@@ -689,7 +735,9 @@ onBeforeUnmount(() => {
       @dblclick="onVideoDblClick"
       @click="onVideoClick"
       @error="onVideoError" />
-    <div v-if="translatedSubtitle" class="subtitle-translation" role="status">{{ translatedSubtitle }}</div>
+    <div v-if="liveSubtitle" class="subtitle-translation" role="status">{{ liveSubtitle }}</div>
+    <div v-else-if="translatedSubtitle" class="subtitle-translation" role="status">{{ translatedSubtitle }}</div>
+    <div v-if="liveCaptureError" class="live-subtitle-error" role="status">{{ liveCaptureError }}</div>
     <div v-if="seeking && !loading" class="seek-notice" role="status" aria-live="polite">正在跳转…</div>
     <div v-if="loading" class="player-loading" role="status" aria-live="polite">
       <span class="player-loading-spinner" aria-hidden="true"></span>

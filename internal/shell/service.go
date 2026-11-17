@@ -1212,6 +1212,9 @@ func (s *ShellService) prepareChannel(id string, token uint64) (playback.Plan, e
 	plan, err := s.playback.Prepare(context.Background(), st)
 	if err != nil {
 		log.Printf("准备直播播放失败 id=%s: %v", id, err)
+	} else {
+		// Web 直播且实时字幕开着：确保字幕管线在跑（切台只清残音，不重启服务）。
+		s.ensureLiveSubtitlesForChannel(string(plan.Backend))
 	}
 	return plan, err
 }
@@ -2207,6 +2210,8 @@ func (s *ShellService) StopPlayback(token uint64) error {
 	if !invalidated {
 		return nil
 	}
+	// 停播/切台时把直播实时字幕也停掉（切台的新 prepare 会重新拉起）。
+	s.stopLiveSubtitlesQuietly()
 	s.playbackMu.Lock()
 	defer s.playbackMu.Unlock()
 	if !s.playbackCurrent(0, requestID) || s.player == nil {

@@ -19,6 +19,7 @@ import (
 	assets "github.com/unbox/unbox"
 	"github.com/unbox/unbox/internal/config"
 	"github.com/unbox/unbox/internal/library"
+	"github.com/unbox/unbox/internal/livesub"
 	"github.com/unbox/unbox/internal/playback"
 	"github.com/unbox/unbox/internal/player"
 	"github.com/unbox/unbox/internal/player/mpvplugin"
@@ -46,13 +47,18 @@ type ShellService struct {
 	vodNames             map[string]string            // 点播站点 key → 显示名
 	mu                   sync.RWMutex                 // 守护 live/vods 读写
 	playback             *playback.Controller
-	playbackMu           sync.Mutex          // 串行化会实际触发 Load+Play 的播放准备
-	playbackSeq          uint64              // 最近一次前端播放请求 token
-	playbackToken        uint64              // 当前前端播放会话 token，0 表示无会话
-	playbackFloor        uint64              // 已失效 token 的上限
-	playbackBridgeMu     sync.Mutex          // 守护桥接信号与事件出口字段
-	playbackBridgeStop   chan struct{}       // 关闭桥接 goroutine 的信号
-	playbackEventEmitter func(PlaybackEvent) // 桥接事件出口（测试可注入）
+	playbackMu           sync.Mutex                                   // 串行化会实际触发 Load+Play 的播放准备
+	playbackSeq          uint64                                       // 最近一次前端播放请求 token
+	playbackToken        uint64                                       // 当前前端播放会话 token，0 表示无会话
+	playbackFloor        uint64                                       // 已失效 token 的上限
+	playbackBridgeMu     sync.Mutex                                   // 守护桥接信号与事件出口字段
+	playbackBridgeStop   chan struct{}                                // 关闭桥接 goroutine 的信号
+	playbackEventEmitter func(PlaybackEvent)                          // 桥接事件出口（测试可注入）
+	liveSubMu            sync.Mutex                                   // 守护直播实时字幕 Manager
+	liveSub              *livesub.Manager                             // 直播实时字幕管线（nil 表示未启动）
+	liveSubFactory       func(livesub.ManagerConfig) *livesub.Manager // 建 Manager（测试可注入）
+	liveSubStarting      bool                                         // 有一次启动在进行（防并发重复启动）
+	liveSubGen           uint64                                       // 停止代次：启动期间被停时，刚起的管线立即停掉
 	mpvPlugin            *mpvplugin.Manager
 	vodCFGs              []*config.Config  // 当前点播源解析后的配置（持久化快照）
 	liveCFGs             []*config.Config  // 当前直播源解析后的配置（持久化快照）

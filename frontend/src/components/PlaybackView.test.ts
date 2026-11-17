@@ -84,6 +84,31 @@ vi.mock('mpegts.js', () => {
   }
 })
 
+// 捕获每次创建的 LiveAudioCapture，测试直接断言启停，不依赖真实 AudioContext。
+const liveAudioInstances = vi.hoisted(() => ({
+  captures: [] as any[],
+}))
+
+vi.mock('../liveAudio', () => {
+  class MockLiveAudioCapture {
+    static instances = liveAudioInstances.captures
+    running = false
+    start = vi.fn(async () => {
+      this.running = true
+    })
+    stop = vi.fn(() => {
+      this.running = false
+    })
+    destroy = vi.fn(() => {
+      this.running = false
+    })
+    constructor() {
+      liveAudioInstances.captures.push(this)
+    }
+  }
+  return { LiveAudioCapture: MockLiveAudioCapture }
+})
+
 async function mountView(plan?: Partial<PlaybackPlan>, extraProps: Record<string, unknown> = {}) {
   const wrapper = mount(PlaybackView, {
     props: {
@@ -107,6 +132,7 @@ function hlsError(type: string, fatal = true, details = 'testDetails') {
 beforeEach(() => {
   instances.hls.length = 0
   instances.flv.length = 0
+  liveAudioInstances.captures.length = 0
 })
 
 describe('PlaybackView', () => {
@@ -577,5 +603,62 @@ describe('刷新与音量控件（2026-10-22）', () => {
     await seek.trigger('mousemove', { clientX: 50 })
     // 悬停在中点 → 气泡显示 01:00（60s），而不是播放进度 00:03
     expect(wrapper.find('.seek-bubble').text()).toBe('01:00')
+  })
+
+  it('直播字幕有值时显示在画面上', async () => {
+    const wrapper = await mountView(undefined, { liveSubtitle: '你好，世界' })
+    const overlay = wrapper.find('.subtitle-translation')
+    expect(overlay.exists()).toBe(true)
+    expect(overlay.text()).toBe('你好，世界')
+  })
+
+  it('直播字幕为空时不显示叠层', async () => {
+    const wrapper = await mountView(undefined, { liveSubtitle: '' })
+    expect(wrapper.find('.subtitle-translation').exists()).toBe(false)
+  })
+
+  it('直播字幕优先于点播译文显示', async () => {
+    const wrapper = await mountView(undefined, { liveSubtitle: '直播中文' })
+    // 点播译文靠 cuechange 触发，这里只验证直播字幕占了叠层位置。
+    expect(wrapper.find('.subtitle-translation').text()).toBe('直播中文')
+  })
+
+  it('播放开始且直播字幕开着时启动音频抓取', async () => {
+    const pusher = { pushLiveAudioChunk: vi.fn(async () => {}) }
+    const wrapper = await mountView(undefined, {
+      liveSubtitleEnabled: true,
+      liveAudioPusher: pusher,
+    })
+    expect(liveAudioInstances.captures.length).toBe(0)
+    await wrapper.find('video').trigger('playing')
+    await nextTick()
+    expect(liveAudioInstances.captures.length).toBe(1)
+    expect(liveAudioInstances.captures[0].start).toHaveBeenCalled()
+  })
+
+  it('直播字幕关着时播放不启动音频抓取', async () => {
+    const pusher = { pushLiveAudioChunk: vi.fn(async () => {}) }
+    const wrapper = await mountView(undefined, {
+      liveSubtitleEnabled: false,
+      liveAudioPusher: pusher,
+    })
+    await wrapper.find('video').trigger('playing')
+    await nextTick()
+    expect(liveAudioInstances.captures.length).toBe(0)
+  })
+
+  it('切台时停掉音频抓取', async () => {
+    const pusher = { pushLiveAudioChunk: vi.fn(async () => {}) }
+    const wrapper = await mountView(undefined, {
+      liveSubtitleEnabled: true,
+      liveAudioPusher: pusher,
+    })
+    await wrapper.find('video').trigger('playing')
+    await nextTick()
+    expect(liveAudioInstances.captures.length).toBe(1)
+    const cap = liveAudioInstances.captures[0]
+    await wrapper.setProps({ plan: { ID: 'p2', Backend: 'web', URL: '/y.m3u8', Kind: 'hls', CanFallback: true } })
+    await nextTick()
+    expect(cap.stop).toHaveBeenCalled()
   })
 })

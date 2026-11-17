@@ -1036,6 +1036,24 @@ body {
   z-index: 5;
 }
 
+/* 直播实时字幕抓音频失败的提示：贴在画面顶部，不挡字幕。 */
+.live-subtitle-error {
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  transform: translateX(-50%);
+  max-width: 90%;
+  padding: 2px 10px;
+  border-radius: 4px;
+  background: rgba(120, 20, 20, 0.8);
+  color: #ffd9d9;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  text-align: center;
+  pointer-events: none;
+  z-index: 5;
+}
+
 /* 画面旋转：transform 过渡 + 容器裁剪，避免旋转过程中内容溢出 */
 .playback-view video { transition: transform 0.2s ease; }
 
