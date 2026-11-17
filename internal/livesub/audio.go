@@ -5,7 +5,7 @@
 // 翻译，译文经 Wails 事件推到前端叠在画面上。
 //
 // 延迟构成：窗口时长（等一窗采满）+ 识别 + 翻译。窗口越短延迟越低，
-// 但太短会把句子切碎、识别和翻译质量都掉下来；默认 2 秒。
+// 但太短会把句子切碎、识别和翻译质量都掉下来；默认 1.5 秒。
 package livesub
 
 import (
@@ -16,9 +16,9 @@ import (
 // SampleRate 是 Whisper 要求的采样率：16kHz 单声道 16 位 PCM。
 const SampleRate = 16000
 
-// DefaultWindowSeconds 是默认窗口时长（秒）：2 秒一窗，
-// 端到端约 3–4 秒；再短句子会被切碎，翻译质量明显下降。
-const DefaultWindowSeconds = 2.0
+// DefaultWindowSeconds 是默认窗口时长（秒）：1.5 秒一窗，
+// 端到端约 3 秒；再短句子会被切碎，翻译质量明显下降。
+const DefaultWindowSeconds = 1.5
 
 // WindowBuffer 把连续 PCM 切成固定长度窗口（不重叠）。
 // 前端每 0.5 秒推一小段，后端攒满一窗就拿去识别。

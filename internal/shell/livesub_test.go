@@ -68,8 +68,8 @@ func TestLiveSubtitleSettingsDefaults(t *testing.T) {
 	if got.Enabled {
 		t.Fatalf("默认 Enabled = true，want false（直播字幕默认关）")
 	}
-	if got.WhisperModel != "base.en" {
-		t.Fatalf("默认 WhisperModel = %q，want base.en", got.WhisperModel)
+	if got.WhisperModel != "tiny.en" {
+		t.Fatalf("默认 WhisperModel = %q，want tiny.en", got.WhisperModel)
 	}
 	if got.WindowSeconds != livesub.DefaultWindowSeconds {
 		t.Fatalf("默认 WindowSeconds = %v，want %v", got.WindowSeconds, livesub.DefaultWindowSeconds)
@@ -103,8 +103,8 @@ func TestLiveSubtitleStatusNotRunning(t *testing.T) {
 	if st.Running {
 		t.Fatal("未启动时 Running 应为 false")
 	}
-	if st.WhisperModel != "base.en" {
-		t.Fatalf("状态里的模型 = %q，want base.en", st.WhisperModel)
+	if st.WhisperModel != "tiny.en" {
+		t.Fatalf("状态里的模型 = %q，want tiny.en", st.WhisperModel)
 	}
 }
 

@@ -33,7 +33,7 @@ const (
 )
 
 // LiveSubtitleSettings 是直播实时字幕选项：默认关闭，
-// 识别模型默认 base.en（准），窗口默认 2 秒（延迟与质量的平衡点）。
+// 识别模型默认 tiny.en（快），窗口默认 1.5 秒（延迟与质量的平衡点）。
 type LiveSubtitleSettings struct {
 	Enabled       bool
 	WhisperModel  string
@@ -64,7 +64,7 @@ type LiveSubtitleStatus struct {
 func (s *ShellService) GetLiveSubtitleSettings() LiveSubtitleSettings {
 	settings := LiveSubtitleSettings{
 		Enabled:       false,
-		WhisperModel:  "base.en",
+		WhisperModel:  "tiny.en",
 		WindowSeconds: livesub.DefaultWindowSeconds,
 	}
 	if s.store == nil {

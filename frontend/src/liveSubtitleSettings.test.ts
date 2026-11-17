@@ -23,16 +23,16 @@ describe('normalizeLiveSubtitleSettings', () => {
   it('空值回退默认', () => {
     expect(normalizeLiveSubtitleSettings(null)).toEqual({
       Enabled: false,
-      WhisperModel: 'base.en',
-      WindowSeconds: 2,
+      WhisperModel: 'tiny.en',
+      WindowSeconds: 1.5,
     })
   })
 
   it('非法窗口回退默认', () => {
-    expect(normalizeLiveSubtitleSettings({ WindowSeconds: 0 }).WindowSeconds).toBe(2)
-    expect(normalizeLiveSubtitleSettings({ WindowSeconds: -1 }).WindowSeconds).toBe(2)
-    expect(normalizeLiveSubtitleSettings({ WindowSeconds: 99 }).WindowSeconds).toBe(2)
-    expect(normalizeLiveSubtitleSettings({ WindowSeconds: NaN }).WindowSeconds).toBe(2)
+    expect(normalizeLiveSubtitleSettings({ WindowSeconds: 0 }).WindowSeconds).toBe(1.5)
+    expect(normalizeLiveSubtitleSettings({ WindowSeconds: -1 }).WindowSeconds).toBe(1.5)
+    expect(normalizeLiveSubtitleSettings({ WindowSeconds: 99 }).WindowSeconds).toBe(1.5)
+    expect(normalizeLiveSubtitleSettings({ WindowSeconds: NaN }).WindowSeconds).toBe(1.5)
   })
 
   it('合法值保留', () => {
@@ -42,7 +42,7 @@ describe('normalizeLiveSubtitleSettings', () => {
   })
 
   it('空模型名回退默认', () => {
-    expect(normalizeLiveSubtitleSettings({ WhisperModel: '   ' }).WhisperModel).toBe('base.en')
+    expect(normalizeLiveSubtitleSettings({ WhisperModel: '   ' }).WhisperModel).toBe('tiny.en')
   })
 })
 
@@ -68,8 +68,8 @@ describe('createLiveSubtitleSettings', () => {
     await store.setWhisperModel('tiny.en')
     expect(getStored().WhisperModel).toBe('tiny.en')
     await store.setWindowSeconds(0)
-    expect(store.settings.value.WindowSeconds).toBe(2)
-    expect(getStored().WindowSeconds).toBe(2)
+    expect(store.settings.value.WindowSeconds).toBe(1.5)
+    expect(getStored().WindowSeconds).toBe(1.5)
   })
 
   it('status 失败返回 null、不抛错', async () => {

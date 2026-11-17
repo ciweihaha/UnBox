@@ -1,15 +1,15 @@
 // liveSubtitleSettings.ts — 设置页「直播实时字幕」分类的加载与持久化。
 //
-// 开关默认关；识别模型默认 base.en、窗口默认 2 秒，非法时回退默认。
+// 开关默认关；识别模型默认 tiny.en、窗口默认 1.5 秒，非法时回退默认。
 // 切换时先更新运行时值再持久化，持久化失败保留运行时值并把错误
 // 交给调用方展示（与 translateSettings.ts 同一模式）。
 import { ref, type Ref } from 'vue'
 
-/** 默认识别模型：base.en（英文，准）；tiny.en 更快但准确率略低。 */
-export const DEFAULT_LIVE_WHISPER_MODEL = 'base.en'
+/** 默认识别模型：tiny.en（英文，快）；base.en 更准但慢约一倍。 */
+export const DEFAULT_LIVE_WHISPER_MODEL = 'tiny.en'
 
-/** 默认窗口时长（秒）：2 秒一窗，端到端约 3–4 秒。 */
-export const DEFAULT_LIVE_WINDOW_SECONDS = 2
+/** 默认窗口时长（秒）：1.5 秒一窗，端到端约 3 秒。 */
+export const DEFAULT_LIVE_WINDOW_SECONDS = 1.5
 
 export interface LiveSubtitleSettings {
   Enabled: boolean

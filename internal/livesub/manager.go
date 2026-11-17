@@ -51,7 +51,7 @@ type Stats struct {
 // ManagerConfig 是 Manager 的配置；依赖可注入假实现以便测试。
 type ManagerConfig struct {
 	WindowSeconds float64 // 窗口秒数，<=0 用默认值
-	WhisperModel  string  // base.en / tiny.en，空用 base.en
+	WhisperModel  string  // tiny.en / base.en，空用 tiny.en
 	DataDir       string  // 资源缓存根目录（程序与模型放其下 livesub/）
 	Transcriber   Transcriber
 	Translator    Translator // 为空时不翻译，直接出英文
@@ -91,7 +91,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		cfg.WindowSeconds = DefaultWindowSeconds
 	}
 	if cfg.WhisperModel == "" {
-		cfg.WhisperModel = "base.en"
+		cfg.WhisperModel = "tiny.en"
 	}
 	return &Manager{
 		cfg:  cfg,
