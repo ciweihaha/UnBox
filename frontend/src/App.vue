@@ -2388,7 +2388,8 @@ onBeforeUnmount(() => {
             <button type="button" class="vod-list-more" @click="reloadVodList()">重新加载</button>
           </div>
           <p v-else-if="!vodListItems.length && vodListEnd" class="vod-state" role="status">该分类暂无内容 <button type="button" class="vod-list-more" @click="reloadVodList()">重新加载</button></p>
-          <template>
+          <!-- 注意：不要用裸 <template> 包 ContentCardList + footer——实测裸 template
+               在这里不渲染子节点（列表取到 60 条也空白），两者直接挂在 section 下。 -->
           <ContentCardList
             ref="vodListRef"
             :items="vodCardItems"
@@ -2412,7 +2413,6 @@ onBeforeUnmount(() => {
               <button v-if="vodListItems.length" type="button" class="vod-list-top" @click="scrollVodListTop">回到顶部</button>
             </div>
           </div>
-          </template>
         </section>
       </div>
 

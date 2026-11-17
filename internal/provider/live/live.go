@@ -37,6 +37,10 @@ func New(channels []config.Channel) *Provider {
 	p := &Provider{byID: make(map[string]int)}
 	seen := map[string]bool{}
 	for _, ch := range channels {
+		// 库里已存坏的频道名/分组名（CP437 二重编码乱码）在这里修回中文，
+		// 界面直接显示正常，不用用户重新导入；修好后下次保存即落盘干净数据。
+		ch.Name = repairMojibake(ch.Name)
+		ch.Group = repairMojibake(ch.Group)
 		if ch.Group == "" {
 			ch.Group = unclassifiedGroup
 		}
@@ -147,12 +151,26 @@ func FetchLive(ctx context.Context, l config.Live, fetcher *config.Fetcher) ([]c
 	return Assemble(ParseM3U(raw)), nil
 }
 
+// RepairChannels 把频道列表里的 CP437 二重编码乱码修回中文（原地修改并返回）。
+// 供 shell 在恢复订阅时调用：库里已存坏的数据在这里修好，下次保存即落盘
+// 干净数据；显示层 live.New 另有同一修复做兜底。
+func RepairChannels(channels []config.Channel) []config.Channel {
+	for i := range channels {
+		channels[i].Name = repairMojibake(channels[i].Name)
+		channels[i].Group = repairMojibake(channels[i].Group)
+	}
+	return channels
+}
+
 // Assemble 把扁平 Entry 按 Name+Group 归并为 Channel（同名=同频道多备用源）。
-// 导出供 shell 处理独立 M3U/TXT 导入。
+// 导出供 shell 处理独立 M3U/TXT 导入。频道名/分组名过一遍 repairMojibake，
+// 防止 CP437 二重编码乱码进库（解析层已修过，这里是兜底）。
 func Assemble(entries []Entry) []config.Channel {
 	var out []config.Channel
 	idx := map[string]int{}
 	for _, e := range entries {
+		e.Name = repairMojibake(e.Name)
+		e.Group = repairMojibake(e.Group)
 		key := channelID(e.Group, e.Name)
 		if i, ok := idx[key]; ok {
 			out[i].URLs = append(out[i].URLs, e.URL)

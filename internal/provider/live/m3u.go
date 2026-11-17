@@ -18,8 +18,9 @@ type Entry struct {
 // splitLines 按行切分播放列表：不再用 bufio.Scanner——它有行长上限，
 // 超长行会让 Scan 直接停掉、静默丢掉该行之后的所有频道。输入本身已
 // 整体读进内存（上游按 64MB 封顶），按换行切分不新增内存风险。
+// 编码先由 decodePlaylistBytes 统一成 UTF-8（GBK 源在这里转码）。
 func splitLines(raw []byte) []string {
-	raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf"))
+	raw = decodePlaylistBytes(raw)
 	parts := bytes.Split(raw, []byte("\n"))
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
@@ -62,17 +63,19 @@ func ParseM3U(raw []byte) []Entry {
 // （如 group-title="综艺,电影"），按第一个逗号切会把标题切碎。
 // 属性用词法扫描提取，避免子串命中：x-tvg-id 不是 tvg-id，logo URL
 // 查询串里的 group-title= 也不是 group-title 属性。
+// 频道名/分组名过一遍 repairMojibake：源文件若是 CP437 二重编码乱码，
+// 在这里修回中文，不让乱码进库。
 func parseExtinf(line string) Entry {
 	var e Entry
 	rest := strings.TrimPrefix(line, "#EXTINF")
 	if i := indexTitleComma(rest); i >= 0 {
-		e.Name = strings.TrimSpace(rest[i+1:])
+		e.Name = repairMojibake(strings.TrimSpace(rest[i+1:]))
 		rest = rest[:i]
 	}
 	attrs := parseExtinfAttrs(rest)
 	e.ID = attrs["tvg-id"]
 	e.Logo = attrs["tvg-logo"]
-	e.Group = attrs["group-title"]
+	e.Group = repairMojibake(attrs["group-title"])
 	return e
 }
 
@@ -163,7 +166,7 @@ func ParseTXT(raw []byte) []Entry {
 		if !hasURLScheme(url) {
 			continue
 		}
-		out = append(out, Entry{Name: name, URL: url})
+		out = append(out, Entry{Name: repairMojibake(name), URL: url})
 	}
 	return out
 }

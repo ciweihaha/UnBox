@@ -798,7 +798,9 @@ func (s *ShellService) RestoreSubscription() (ImportResult, error) {
 	s.vodCFGs = vodCFGs
 	s.liveRef = liveRef
 	s.liveCFGs = liveCFGs
-	s.liveChannels = sub.Channels
+	// 库里存坏的直播频道名（CP437 二重编码乱码）在这里修回中文，
+	// 下次保存即落盘干净数据；显示层 live.New 另有同一修复做兜底。
+	s.liveChannels = live.RepairChannels(sub.Channels)
 
 	var channels int
 	if len(sub.Channels) > 0 {
