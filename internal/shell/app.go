@@ -57,7 +57,10 @@ type ShellService struct {
 	liveSubMu            sync.Mutex                                   // 守护直播实时字幕 Manager
 	liveSub              *livesub.Manager                             // 直播实时字幕管线（nil 表示未启动）
 	liveSubFactory       func(livesub.ManagerConfig) *livesub.Manager // 建 Manager（测试可注入）
-	liveSubStarting      bool                                         // 有一次启动在进行（防并发重复启动）
+	liveSubStarting      bool                                         // 有一次启动在进行（后来者等它结束再决定，不静默丢弃）
+	liveSubStartDone     chan struct{}                                // 启动进行时非空，启动结束关闭（等它的人据此醒来）
+	liveSubStartCancel   context.CancelFunc                           // 取消进行中的启动（含下载）；停播时调用
+	liveSubLastErr       string                                       // 最近一次启动失败原因（管线未建时也在状态里回显）
 	liveSubGen           uint64                                       // 停止代次：启动期间被停时，刚起的管线立即停掉
 	mpvPlugin            *mpvplugin.Manager
 	vodCFGs              []*config.Config  // 当前点播源解析后的配置（持久化快照）
