@@ -1,11 +1,24 @@
 // liveSubtitleSettings.test.ts — 直播实时字幕设置的加载、持久化与归一化。
 import { describe, expect, it, vi } from 'vitest'
+// @ts-expect-error Vitest runs in Node; the app intentionally has no Node type dependency.
+import { readFileSync } from 'node:fs'
 import {
   createLiveSubtitleSettings,
   normalizeLiveSubtitleSettings,
   type LiveSubtitleSettings,
   type LiveSubtitleSettingsApi,
 } from './liveSubtitleSettings'
+
+describe('启动加载', () => {
+  it('应用启动时加载直播字幕设置，不只在进设置页时加载', () => {
+    // 2026-11-18 回归：启动时只加载了播放设置，直播字幕设置默认是关的，
+    // 导致首次播放后端管线已起、前端却不抓音频，一直没有字幕；
+    // 只有进过设置页才加载，开关才变成开。
+    const app = readFileSync('src/App.vue', 'utf8')
+    const mounted = app.slice(app.indexOf('onMounted(() => {'), app.indexOf('onBeforeUnmount('))
+    expect(mounted).toContain('liveSubtitleSettingsStore.load()')
+  })
+})
 
 function stubApi(initial: Partial<LiveSubtitleSettings> | null = null) {
   let stored: LiveSubtitleSettings = normalizeLiveSubtitleSettings(initial)

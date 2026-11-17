@@ -2078,6 +2078,9 @@ onMounted(() => {
   loadTheme()
   loadContentCardStyle()
   void playbackSettingsStore.load()
+  // 直播实时字幕开关默认是关的，启动时就要从后端读，否则首次播放前端不抓音频、
+  // 一直没有字幕（以前只在进设置页时加载）。
+  void liveSubtitleSettingsStore.load()
   document.addEventListener('click', closeCardContextMenu)
   document.addEventListener('keydown', handleCardContextMenuKeydown)
   window.addEventListener('resize', syncSearchHistoryDropdownOnResize)
