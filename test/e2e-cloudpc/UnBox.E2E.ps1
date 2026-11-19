@@ -519,7 +519,7 @@ if ($SoakMinutes -gt 0) {
   for ($m = 1; $m -le $SoakMinutes; $m++) {
     Start-Sleep -Seconds 60
     if (-not (Test-ProcessAlive -Id $script:Pid)) {
-      "MIN $m: PROCESS GONE (silent exit)" | Out-File $soakLog -Append
+      "MIN ${m}: PROCESS GONE (silent exit)" | Out-File $soakLog -Append
       $soakPass = $false; $froze = $true; break
     }
     $p = Get-PlayerProgress
@@ -528,7 +528,7 @@ if ($SoakMinutes -gt 0) {
     if ($null -ne $p -and $null -ne $lastProgress -and $p -eq $lastProgress) { $stuckSamples++ } else { $stuckSamples = 0 }
     if ($stuckSamples -ge 2 -and -not $froze) {
       $froze = $true
-      "MIN $m: FROZEN at $p, waiting 60s for auto-recovery" | Out-File $soakLog -Append
+      "MIN ${m}: FROZEN at $p, waiting 60s for auto-recovery" | Out-File $soakLog -Append
       Shot -Tag ("soak-frozen-min$m") | Out-Null
       Start-Sleep -Seconds 60
       $p2 = Get-PlayerProgress
