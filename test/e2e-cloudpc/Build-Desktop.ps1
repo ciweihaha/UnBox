@@ -26,10 +26,12 @@ trap { Log "UNEXPECTED ERROR: $_"; exit 1 }
 Set-Location $RepoRoot
 
 # 原生命令：stdout/stderr 分写文件，返回退出码（不走 2>&1，见文件头注释）。
+# 参数别叫 $Args：它和自动变量 $Args 冲突，@Args 展开为空，命令会无参运行
+#（wails3 出 help、go 出 usage——2026-11-20 01:26 构建就是这么死的）。
 function Invoke-Native {
-  param([string]$Exe, [string[]]$Args, [string]$OutLog)
+  param([string]$Exe, [string[]]$CmdArgs, [string]$OutLog)
   $errLog = "$OutLog.err"
-  & $Exe @Args > $OutLog 2> $errLog
+  & $Exe @CmdArgs > $OutLog 2> $errLog
   $code = $LASTEXITCODE
   if ((Test-Path $errLog) -and (Get-Item $errLog).Length -gt 0) {
     Get-Content $errLog -Raw | Out-File $OutLog -Encoding utf8 -Append
