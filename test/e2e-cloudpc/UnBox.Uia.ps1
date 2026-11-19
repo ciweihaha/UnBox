@@ -208,37 +208,21 @@ function Click-At {
   Start-Sleep -Milliseconds 300
 }
 
-# Set-InputText 往输入框填中文：不要用 ValuePattern.SetValue——它不触发
-# Vue 的 v-model，框里有字、app 里还是空；剪贴板粘贴（0.9.16 轮验证过）才行。
-# 粘贴前先激活窗口再点框拿焦点（窗口不是前台时 SendKeys 发不到输入框里）。
+# Set-InputText 往输入框填中文：用 ValuePattern.SetValue——Chromium 的实现
+# 会发 input 事件，Vue 的 v-model 能收到（实测：设完 5 秒出 26 张卡）。
+# 不要用剪贴板粘贴/键盘打字：这台云电脑上 SendKeys 发不到输入框里
+#（窗口前台、焦点都对还是进不去；0.9.16 轮的粘贴法在这里行不通）。
+# 注意：设完读回经常是空（元素过期），不要拿读回值验，拿搜索结果验。
 function Set-InputText {
   param(
     [System.Windows.Automation.AutomationElement]$Edit,
     [string]$Text
   )
   if (-not $Edit) { return $false }
-  Set-ActiveWindow -Window $script:Win
   try {
-    $r = $Edit.Current.BoundingRectangle
-    Click-At -X ([int]($r.X + $r.Width / 2)) -Y ([int]($r.Y + $r.Height / 2))
-  } catch { }
-  Start-Sleep -Milliseconds 300
-  [System.Windows.Forms.Clipboard]::SetText($Text)
-  [System.Windows.Forms.SendKeys]::SendWait('^a')
-  [System.Windows.Forms.SendKeys]::SendWait('^v')
-  Start-Sleep -Milliseconds 500
-  try {
-    $v = $Edit.GetCurrentPattern($script:ValuePattern).Value
-    if ($v -eq $Text) { return $true }
-  } catch { }
-  # 粘贴没进：退到键盘逐字打（SendKeys 直接发 Unicode 字符）。
-  try { $Edit.SetFocus() } catch { }
-  [System.Windows.Forms.SendKeys]::SendWait($Text)
-  Start-Sleep -Milliseconds 500
-  try {
-    $v = $Edit.GetCurrentPattern($script:ValuePattern).Value
-    return ($v -eq $Text)
-  } catch { return $true }
+    $Edit.GetCurrentPattern($script:ValuePattern).SetValue($Text)
+    return $true
+  } catch { return $false }
 }
 
 function Move-Mouse {

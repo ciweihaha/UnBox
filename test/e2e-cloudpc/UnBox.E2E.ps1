@@ -532,6 +532,14 @@ for ($try = 1; $try -le 5 -and -not $opened; $try++) {
     } catch { }
   }
   if ($cfTrigger) { $opened = Invoke-Element $cfTrigger }
+  if (-not $opened -and $cfTrigger) {
+    # InvokePattern 打不开时退到鼠标点触发器中心（设置页按钮，合成点击可用）。
+    try {
+      $r = $cfTrigger.Current.BoundingRectangle
+      Click-At -X ([int]($r.X + $r.Width / 2)) -Y ([int]($r.Y + $r.Height / 2))
+      $opened = $true
+    } catch { }
+  }
   if (-not $opened) { Start-Sleep -Seconds 2 }
 }
 $cfEv = 'no-dropdown-trigger'
