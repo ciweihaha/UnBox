@@ -445,36 +445,40 @@ foreach ($e in $all) {
 }
 Add-Result -Id 'T23' -Name '小城良方详情有选集按钮' -Pass ($epBtns.Count -ge 1) -Evidence "episodeButtons=$($epBtns.Count)"
 Shot -Tag 'detail-xiaocheng' | Out-Null
-# 类似内容：不同片名。
-$similarTitle = Find-Element -Root $script:Win -Name '更多类似内容'
+# 类似内容：不同片名。类似区是详情落地后才后台去全网找的（浏览同类
+# 分类、最多 10 秒 + 回落搜索），标题先出来、卡片后到：轮询等卡片出现。
 $similarCards = @()
+$similarCardW = $null
+$similarTitle = Find-Element -Root $script:Win -Name '更多类似内容'
 if ($similarTitle) {
-  Start-Sleep -Seconds 5
-  $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-  # 类似区卡片：取“更多类似内容”标题之后、窗口底部之前的卡片标题（去重后数不同片名）。
-  $inSimilar = $false
-  foreach ($e in $all) {
-    try {
-      $n = $e.Current.Name
-      if ($n -eq '更多类似内容') { $inSimilar = $true; continue }
-      if ($inSimilar -and $e.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $n -and $n -ne '小城良方') { $similarCards += $n }
-    } catch { }
+  $end = (Get-Date).AddSeconds(30)
+  while ((Get-Date) -lt $end -and $similarCards.Count -eq 0) {
+    $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    $inSimilar = $false
+    $found = @()
+    $foundW = $null
+    foreach ($e in $all) {
+      try {
+        $n = $e.Current.Name
+        if ($n -eq '更多类似内容') { $inSimilar = $true; continue }
+        if (-not $inSimilar) { continue }
+        $t = $e.Current.ControlType.ProgrammaticName
+        $r = $e.Current.BoundingRectangle
+        # 卡片是 Button 或 ListItem、宽约 121px；标题文本（Text）不算。
+        if (($t -eq 'ControlType.Button' -or $t -eq 'ControlType.ListItem') -and $n -and $n -ne '小城良方' -and $r.Width -ge 80 -and $r.Width -le 200) {
+          $found += $n
+          if ($null -eq $foundW) { $foundW = $r.Width }
+        }
+      } catch { }
+    }
+    if ($found.Count -gt 0) { $similarCards = $found; $similarCardW = $foundW; break }
+    Start-Sleep -Seconds 3
   }
 }
 $distinct = ($similarCards | Sort-Object -Unique)
 $sameTitle = ($similarCards | Where-Object { $_ -like '*小城良方*' }).Count
 Add-Result -Id 'T24' -Name '更多类似内容是不同片名' -Pass ($distinct.Count -ge 3 -and $sameTitle -eq 0) -Evidence "cards=$($similarCards.Count) distinct=$($distinct.Count) sameTitle=$sameTitle distinctList='$($distinct -join ' | ')'"
-# 类似卡片宽度≤140。
-$cardW = $null
-if ($similarTitle) {
-  $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-  foreach ($e in $all) {
-    try {
-      if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $e.Current.Name -and $e.Current.Name -ne '小城良方' -and $e.Current.BoundingRectangle.Width -ge 80 -and $e.Current.BoundingRectangle.Width -le 200 -and $e.Current.BoundingRectangle.Y -gt 500) { $cardW = $e.Current.BoundingRectangle.Width; break }
-    } catch { }
-  }
-}
-Add-Result -Id 'T25' -Name '类似内容卡片收窄（宽≤140）' -Pass ($null -ne $cardW -and $cardW -le 140) -Evidence "cardW=$cardW"
+Add-Result -Id 'T25' -Name '类似内容卡片收窄（宽≤140）' -Pass ($null -ne $similarCardW -and $similarCardW -le 140) -Evidence "cardW=$similarCardW"
 
 # ---------- 报错 toast 5 秒自消 ----------
 Go-Mode 'settings' | Out-Null
