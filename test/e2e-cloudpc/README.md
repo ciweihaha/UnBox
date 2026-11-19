@@ -73,3 +73,26 @@ Start-ScheduledTask -TaskName 'UB-E2E'
 - **云电脑构建**：`proxy.golang.org` 连不上，构建脚本里设
   `GOPROXY=https://mirrors.aliyun.com/goproxy,direct` + `GOSUMDB=off`；
   GitHub 直链慢，下载走 `gh-proxy.com`（ghfast.top 从云电脑不通）。
+
+## 经验（0.9.17 台式机首跑 15/33 后补的诊断）
+
+- **Go 日志要重定向**：app 平时不写日志文件，标题栏 HRESULT、panic
+  堆栈只在 stderr。E2E 启动时 `-RedirectStandardOutput/Error` 到
+  `app-stdout.txt` / `app-stderr.txt`，悄悄退出的根因靠它定位。
+- **滚轮量法（T10/T12）**：WebView2 不暴露 ScrollPattern，旧兜底用
+  FromPoint 取元素——宿主元素没名字（item=''），yAfter 恒为空，滚没滚
+  都判失败。改成按名字找标尺元素，看滚轮后 Y 是否移动。
+- **遮罩点按（T06）**：先走 UIA Invoke（取光标处元素直接 Invoke），
+  不行再退到合成鼠标点按，两次结果都记下来，分清是“点按没送达页面”
+  还是“遮罩不响应”。
+- **首播要等够（T16）**：冷启动中继取流慢，首播等 45 秒；频道行名是
+  “CCTV-2 财经”这种，兜底别写 `*CCTV财经*`（永远匹配不到），写 `*财经*`。
+- **详情页量不到先分清“没进详情”还是“进了量不到”（T21/T22/T29 组）**：
+  搜完把 found + similar/episodes/lines 三个信号都记进 evidence。
+- **类似卡宽（T25）**：CSS 卡片 120px、详情海报 150px，第一个量到的
+  可能是海报；把整行卡宽都记下来再判。
+- **浸泡（T34）**：每分钟除了进度，还记 WebView2/mpv 进程数、UIA 元素
+  总数、状态行——分清渲染进程死、回落 mpv、单纯读不到三者。
+- **无 git 构建的内部版本是 `(devel)`（T03b）**：不是 app bug，是构建
+  环境没有 .git；不要为此改 app 代码造假版本。台式机装 Git 或以 CI
+  发版构建（走 git tag）为准。

@@ -124,6 +124,16 @@ function Search-Vod {
   return $false
 }
 
+function Get-StatusNames {
+  # 当前播放状态行（正在播放/正在重连/频道播放失败/正在使用 mpv 播放）的名字。
+  $out = @()
+  foreach ($pat in @('正在播放', '正在重连', '频道播放失败', '正在使用 mpv 播放')) {
+    $el = Find-Element -Root $script:Win -Name $pat
+    if ($el) { try { $out += $el.Current.Name } catch { $out += $pat } }
+  }
+  return ($out -join ' | ')
+}
+
 function Get-PlayerProgress {
   # 播放器进度：优先读 .ctrl-time 文本“mm:ss / mm:ss”（直播的 range
   # input 值恒为 0，读它永远是 0；文本才是真实进度）。
@@ -202,24 +212,34 @@ function Test-WheelScrolls {
     Add-Result -Id $Id -Name $Name -Pass ($after -ne $before) -Evidence "scrollpercent before=$before after=$after"
     return
   }
-  # ScrollPattern 读不到时：看光标处条目的位置是否移动（滚下去后 Y 变小或滚出视图）。
-  $el = $script:AE::FromPoint((New-Object System.Windows.Point($X, $Y)))
-  $name = ''
-  $yBefore = $null
-  if ($el) {
-    try { $name = $el.Current.Name; $yBefore = $el.Current.BoundingRectangle.Y } catch { }
+  # ScrollPattern 读不到时（WebView2 不暴露滚动容器）：拿一个有名字的
+  # 元素当标尺，看滚轮后它的 Y 是否移动。旧量法用 FromPoint 取元素，
+  # WebView2 宿主元素没名字（item=''），量出来的 yAfter 恒为空，滚没滚
+  # 都判失败，所以改成按名字找标尺。
+  $ruler = $null
+  $wr = Get-WindowRect
+  $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  foreach ($e in $all) {
+    try {
+      $n = $e.Current.Name; $r = $e.Current.BoundingRectangle
+      if ($n -and $n.Length -ge 2 -and $r.Y -gt ($wr.Y + $wr.Height * 0.45) -and $r.Y -lt ($wr.Y + $wr.Height * 0.95) -and $r.Width -gt 20) { $ruler = $e; break }
+    } catch { }
   }
+  if (-not $ruler) {
+    Add-Result -Id $Id -Name $Name -Pass $false -Evidence 'no ruler element found'
+    return
+  }
+  $name = $ruler.Current.Name
+  $yBefore = $ruler.Current.BoundingRectangle.Y
   Send-Wheel -Delta -360 -Clicks 2
   Start-Sleep -Milliseconds 800
   $yAfter = $null
   $gone = $false
-  if ($name) {
-    $el2 = Find-Element -Root $script:Win -Name $name -Exact
-    if ($el2) { try { $yAfter = $el2.Current.BoundingRectangle.Y } catch { $gone = $true } }
-    else { $gone = $true }
-  }
+  $el2 = Find-Element -Root $script:Win -Name $name -Exact
+  if ($el2) { try { $yAfter = $el2.Current.BoundingRectangle.Y } catch { $gone = $true } }
+  else { $gone = $true }
   $moved = $gone -or ($null -ne $yBefore -and $null -ne $yAfter -and [Math]::Abs($yAfter - $yBefore) -gt 5)
-  Add-Result -Id $Id -Name $Name -Pass $moved -Evidence "item='$name' yBefore=$yBefore yAfter=$yAfter gone=$gone"
+  Add-Result -Id $Id -Name $Name -Pass $moved -Evidence "rulerLen=$($name.Length) yBefore=$yBefore yAfter=$yAfter gone=$gone"
 }
 
 # ---------- 启动 ----------
@@ -227,7 +247,9 @@ if (-not (Test-Path $ExePath)) { throw "找不到测试包：$ExePath" }
 # 先清掉残留的旧版进程（0.9.16 轮的 UB916-Launch 留了一个在跑），
 # 否则按窗口名找会测到旧窗口。
 Stop-UnBoxProcesses
-$proc = Start-Process -FilePath $ExePath -WorkingDirectory (Split-Path $ExePath -Parent) -PassThru
+# Go 日志（含标题栏着色逐项 HRESULT、panic 堆栈）重定向到文件：
+# 悄悄退出的根因只能靠它定位，平时 app 不写日志文件。
+$proc = Start-Process -FilePath $ExePath -WorkingDirectory (Split-Path $ExePath -Parent) -PassThru -RedirectStandardOutput (Join-Path $OutDir 'app-stdout.txt') -RedirectStandardError (Join-Path $OutDir 'app-stderr.txt')
 $script:AppPid = $proc.Id
 $script:Win = Wait-For { Get-UnBoxWindowForPid -ProcessId $script:AppPid } -Seconds 60
 if (-not $script:Win) { $script:Win = Wait-For { Get-UnBoxWindow } -Seconds 10 }
@@ -285,21 +307,30 @@ if ($aboutTitle) {
   Add-Result -Id 'T05' -Name '关于：Esc 关闭' -Pass $gone -Evidence "closedAfterEsc=$gone"
   if (-not $gone) { Invoke-Element $closeBtn | Out-Null; Start-Sleep -Milliseconds 500 }
   # 遮罩点击关闭：重开后点弹窗外、窗口内的空白处。
+  # 先走 UIA Invoke（合成鼠标在该 app 里不可靠，README 有记）：
+  # 取光标处的元素直接 Invoke，点的就是遮罩本身；不行再退到合成鼠标点按，
+  # 两次结果都记下来，好分清是“点按没送达页面”还是“遮罩不响应”。
   Click-Name '关于我们' | Out-Null
   Start-Sleep -Seconds 1
   $panel = Find-Element -Root $script:Win -Name '关于 UnBox'
   if ($panel) {
     $pr = Get-ElementRect $panel
     Move-Mouse -X ([int]($wr.X + 30)) -Y ([int]($wr.Y + $wr.Height - 30))
-    Add-Type @"
+    $ptEl = $script:AE::FromPoint((New-Object System.Windows.Point(([int]($wr.X + 30)), ([int]($wr.Y + $wr.Height - 30)))))
+    $uiaClicked = Invoke-ElementOrAncestor $ptEl
+    Start-Sleep -Milliseconds 800
+    $gone2 = $null -eq (Find-Element -Root $script:Win -Name '关于 UnBox')
+    if (-not $gone2) {
+      Add-Type @"
 using System; using System.Runtime.InteropServices;
 public static class Clicker { [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, int d, UIntPtr e); }
 "@ -ErrorAction SilentlyContinue
-    [Clicker]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
-    [Clicker]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
-    Start-Sleep -Milliseconds 800
-    $gone2 = $null -eq (Find-Element -Root $script:Win -Name '关于 UnBox')
-    Add-Result -Id 'T06' -Name '关于：点遮罩关闭' -Pass $gone2 -Evidence "closedAfterMaskClick=$gone2"
+      [Clicker]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+      [Clicker]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+      Start-Sleep -Milliseconds 800
+      $gone2 = $null -eq (Find-Element -Root $script:Win -Name '关于 UnBox')
+    }
+    Add-Result -Id 'T06' -Name '关于：点遮罩关闭' -Pass $gone2 -Evidence "uiaInvoke=$uiaClicked closedAfterMaskClick=$gone2"
     if (-not $gone2) { Send-Key '{ESC}'; Start-Sleep -Milliseconds 500 }
   } else {
     Add-Result -Id 'T06' -Name '关于：点遮罩关闭' -Pass $false -Evidence '重开关于失败'
@@ -334,20 +365,23 @@ $liveList = Find-Element -Root $script:Win -Name 'CCTV'
 Test-WheelScrolls -Id 'T12' -Name '滚轮：直播列表能滚' -X ([int]($wr.X + 200)) -Y ([int]($wr.Y + $wr.Height / 2))
 Shot -Tag 'live' | Out-Null
 # 先点第一行播起来（播放器、进度条都是播后才出现），再量两栏与播放区。
-# CCTV-1 偶尔起不来（源不稳）：20 秒没进度就换 CCTV-2 再试，记下用的台。
+# CCTV-1 偶尔起不来（源不稳）：冷启动中继取流慢，首播等 45 秒（原来 20 秒
+# 不够，T16 在 0:00 上等满了两轮）；没进度就换 CCTV-2 再试，记下用的台。
+# 频道行名是“CCTV-2 财经”这种，旧兜底 '*CCTV财经*' 永远匹配不到，改成 '*财经*'。
 $firstRow = Find-ChannelRow -Root $script:Win -NameLike '*CCTV综合*'
 if (-not $firstRow) { $firstRow = Find-ChannelRow -Root $script:Win -NameLike '*CCTV*' }
 if ($firstRow) { Invoke-Element $firstRow | Out-Null }
-$p0 = Wait-PlayerProgress -Seconds 20
+$p0 = Wait-PlayerProgress -Seconds 45
 $liveChannelUsed = 'CCTV综合'
 if ($null -eq $p0 -or $p0 -le 0) {
-  $secondRow = Find-ChannelRow -Root $script:Win -NameLike '*CCTV财经*'
+  $secondRow = Find-ChannelRow -Root $script:Win -NameLike '*财经*'
   if ($secondRow) {
     Invoke-Element $secondRow | Out-Null
-    $p0 = Wait-PlayerProgress -Seconds 20
+    $p0 = Wait-PlayerProgress -Seconds 30
     $liveChannelUsed = 'CCTV财经'
   }
 }
+$liveStatusAtStart = Get-StatusNames
 $playerGroup = Find-PlayerGroup
 $pgRect = Get-ElementRect $playerGroup
 Add-Result -Id 'T14' -Name '直播两栏：左列表右播放' -Pass (($null -ne $liveList) -and ($null -ne $playerGroup)) -Evidence "list=$($null -ne $liveList) playerW=$($pgRect.Width)"
@@ -384,7 +418,7 @@ if (-not $pass16) {
   $p2 = Get-PlayerProgress
   $pass16 = ($null -ne $p1 -and $null -ne $p2 -and $p2 -gt $p1)
 }
-Add-Result -Id 'T16' -Name '直播点播后进度前进' -Pass $pass16 -Evidence "channel=$liveChannelUsed p1=$p1 p2=$p2"
+Add-Result -Id 'T16' -Name '直播点播后进度前进' -Pass $pass16 -Evidence "channel=$liveChannelUsed p1=$p1 p2=$p2 status='$liveStatusAtStart'"
 # 空格暂停/继续。
 Send-Key ' '
 Start-Sleep -Seconds 3
@@ -402,10 +436,17 @@ Shot -Tag 'live-playing' | Out-Null
 
 # ---------- 点播：搜荒野求生进详情 ----------
 $foundManvs = Search-Vod -Query '荒野求生'
+# 详情到底开没开：首跑 T21/T22/T29 全空，但 T23/T24 证明详情本身能加载，
+# 必须先分清是“没进详情”还是“进了详情但量不到”，否则修错地方。
+$detailSignals = @()
+if ($null -ne (Find-Element -Root $script:Win -Name '更多类似内容')) { $detailSignals += 'similar' }
+if ((Find-Elements -Root $script:Win -NameLike '第*集*').Count -ge 1) { $detailSignals += 'episodes' }
+if ((Find-Elements -Root $script:Win -NameLike '线路*').Count -ge 1) { $detailSignals += 'lines' }
+$detailOpenedEv = "found=$foundManvs signals='$($detailSignals -join ',')'"
 # 线路按钮友好名。
 $lineBtns = Find-Elements -Root $script:Win -NameLike '线路*'
 $rawIds = Find-Elements -Root $script:Win -NameLike '*m3u8*'
-Add-Result -Id 'T21' -Name '详情线路显示友好名（线路N）' -Pass ($lineBtns.Count -ge 1 -and $rawIds.Count -eq 0) -Evidence "friendly=$($lineBtns.Count) rawIds=$($rawIds.Count)"
+Add-Result -Id 'T21' -Name '详情线路显示友好名（线路N）' -Pass ($lineBtns.Count -ge 1 -and $rawIds.Count -eq 0) -Evidence "friendly=$($lineBtns.Count) rawIds=$($rawIds.Count) $detailOpenedEv"
 # 选集按钮更大：量第一个“第*集”按钮的高度。
 $epBtn = $null
 $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
@@ -413,7 +454,7 @@ foreach ($e in $all) {
   try { if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $e.Current.Name -match '^第.*集$') { $epBtn = $e; break } } catch { }
 }
 $epRect = Get-ElementRect $epBtn
-Add-Result -Id 'T22' -Name '选集按钮做大（高≥30）' -Pass ($epRect -and $epRect.Height -ge 30) -Evidence "epBtnH=$($epRect.Height)"
+Add-Result -Id 'T22' -Name '选集按钮做大（高≥30）' -Pass ($epRect -and $epRect.Height -ge 30) -Evidence "epBtnH=$($epRect.Height) $detailOpenedEv"
 # 点播空格暂停。
 if ($epBtn) { Invoke-Element $epBtn | Out-Null }
 $q1 = Wait-PlayerProgress -Seconds 20
@@ -466,6 +507,7 @@ Shot -Tag 'detail-xiaocheng' | Out-Null
 # 分类、最多 10 秒 + 回落搜索），标题先出来、卡片后到：轮询等卡片出现。
 $similarCards = @()
 $similarCardW = $null
+$similarCardWs = @()
 $similarTitle = Find-Element -Root $script:Win -Name '更多类似内容'
 if ($similarTitle) {
   $end = (Get-Date).AddSeconds(30)
@@ -474,6 +516,7 @@ if ($similarTitle) {
     $inSimilar = $false
     $found = @()
     $foundW = $null
+    $foundWs = @()
     foreach ($e in $all) {
       try {
         $n = $e.Current.Name
@@ -484,18 +527,21 @@ if ($similarTitle) {
         # 卡片是 Button 或 ListItem、宽约 121px；标题文本（Text）不算。
         if (($t -eq 'ControlType.Button' -or $t -eq 'ControlType.ListItem') -and $n -and $n -ne '小城良方' -and $r.Width -ge 80 -and $r.Width -le 200) {
           $found += $n
+          $foundWs += [int]$r.Width
           if ($null -eq $foundW) { $foundW = $r.Width }
         }
       } catch { }
     }
-    if ($found.Count -gt 0) { $similarCards = $found; $similarCardW = $foundW; break }
+    if ($found.Count -gt 0) { $similarCards = $found; $similarCardW = $foundW; $similarCardWs = $foundWs; break }
     Start-Sleep -Seconds 3
   }
 }
 $distinct = ($similarCards | Sort-Object -Unique)
 $sameTitle = ($similarCards | Where-Object { $_ -like '*小城良方*' }).Count
 Add-Result -Id 'T24' -Name '更多类似内容是不同片名' -Pass ($distinct.Count -ge 3 -and $sameTitle -eq 0) -Evidence "cards=$($similarCards.Count) distinct=$($distinct.Count) sameTitle=$sameTitle distinctList='$($distinct -join ' | ')'"
-Add-Result -Id 'T25' -Name '类似内容卡片收窄（宽≤140）' -Pass ($null -ne $similarCardW -and $similarCardW -le 140) -Evidence "cardW=$similarCardW"
+# 首跑 cardW=151：CSS 里类似卡片是 120px、详情海报是 150px，第一个量到的
+# 可能是海报而不是卡片，所以把全部卡宽都记下来，看 151 是个例还是整行都宽。
+Add-Result -Id 'T25' -Name '类似内容卡片收窄（宽≤140）' -Pass ($null -ne $similarCardW -and $similarCardW -le 140) -Evidence "cardW=$similarCardW allWidths='$($similarCardWs -join ',')'"
 
 # ---------- 报错 toast 5 秒自消 ----------
 Go-Mode 'settings' | Out-Null
@@ -579,6 +625,22 @@ if ($opened) {
   $has3 = (($opts | Where-Object { $_ -match '聚合万能源' }).Count -ge 1) -and (($opts | Where-Object { $_ -match 'OrionTV' }).Count -ge 1) -and (($opts | Where-Object { $_ -match '亚洲点播' }).Count -ge 1)
   $cfPass = $has3
   $cfEv = "opened=$opened options='$($opts -join ' | ')'"
+  # 选项为空时：把触发器下方 400px 内的全部按钮/ListItem 名记下来，
+  # 看菜单到底渲染了什么（是源没加载，还是选项名不是源名）。
+  if (-not $has3 -and $cfTrigger) {
+    try {
+      $tr = $cfTrigger.Current.BoundingRectangle
+      $near = @()
+      foreach ($e in $all2) {
+        try {
+          $r = $e.Current.BoundingRectangle
+          $t = $e.Current.ControlType.ProgrammaticName
+          if (($t -eq 'ControlType.Button' -or $t -eq 'ControlType.ListItem') -and $r.Y -ge $tr.Y -and $r.Y -le ($tr.Y + 400) -and $e.Current.Name) { $near += "$($e.Current.Name)@$([int]$r.Width)" }
+        } catch { }
+      }
+      $cfEv += " nearMenu='$((($near | Sort-Object -Unique) -join ' | '))'"
+    } catch { }
+  }
   Send-Key '{ESC}'
 }
 if (-not $opened) {
@@ -601,6 +663,7 @@ Shot -Tag 'settings-cf' | Out-Null
 $switchOk = $true
 $switchEv = ''
 $switchChanged = 0
+$switchLog = ''
 Go-Mode 'live' | Out-Null
 Start-Sleep -Seconds 2
 for ($i = 0; $i -lt 10; $i++) {
@@ -610,18 +673,24 @@ for ($i = 0; $i -lt 10; $i++) {
     $before = ''
     $st = Find-Element -Root $script:Win -Name '正在播放'
     if ($st) { $before = $st.Current.Name }
+    $targetName = ''
+    try { $targetName = $target.Current.Name } catch { }
     Invoke-Element $target | Out-Null
     # 切台要真换台：等状态文本变成另一台才算成功（只看进程活着不够）。
+    # 首跑 5/10：把每次切台前后的状态名记下来，看没换成的那几次是卡在
+    # “正在重连”（慢台 10 秒不够）还是压根没点上。
     $changed = Wait-For {
       $s = Find-Element -Root $script:Win -Name '正在播放'
       $s -and ($s.Current.Name -ne $before)
     } -Seconds 10
+    $afterStatus = Get-StatusNames
     if ($changed) { $switchChanged++ }
+    $switchLog += "sw$i target='$targetName' before='$before' changed=$($null -ne $changed) status='$afterStatus'; "
     Start-Sleep -Milliseconds 300
   }
   if (-not (Test-ProcessAlive -Id $script:AppPid)) { $switchOk = $false; $switchEv = "died at switch $i"; break }
 }
-if ($switchOk) { $switchEv = "$switchChanged/10 switches changed channel, process alive" }
+if ($switchOk) { $switchEv = "$switchChanged/10 switches changed channel, process alive | $switchLog" }
 $switchOk = $switchOk -and ($switchChanged -ge 8)
 Add-Result -Id 'T31' -Name '反复切台 10 次不崩且真换台' -Pass $switchOk -Evidence $switchEv
 # 空搜索：输一个不存在的片名，应显示“暂无搜索结果”而不是卡死/报错。
@@ -663,7 +732,15 @@ if ($SoakMinutes -gt 0) {
     }
     $p = Get-PlayerProgress
     $reconnecting = $null -ne (Find-Element -Root $script:Win -Name '正在重连')
-    "MIN $m $(Get-Date -Format 'HH:mm:ss') progress=$p reconnecting=$reconnecting" | Out-File $soakLog -Append
+    # 浸泡诊断：每分钟记 WebView2/mpv 进程数、UIA 元素总数、状态行。
+    # 首跑 MIN 11–19 进度读空：要分清是渲染进程死了（uiaCount 骤降）、
+    # 回落到 mpv 了（mpv 进程出现、页内控件消失）还是单纯读不到。
+    $wvCount = (Get-Process -Name 'msedgewebview2' -ErrorAction SilentlyContinue).Count
+    $mpvCount = (Get-Process -Name 'mpv*' -ErrorAction SilentlyContinue).Count
+    $uiaCount = -1
+    try { $uiaCount = ($script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)).Count } catch { }
+    $stNames = Get-StatusNames
+    "MIN $m $(Get-Date -Format 'HH:mm:ss') progress=$p reconnecting=$reconnecting wv2=$wvCount mpv=$mpvCount uia=$uiaCount status='$stNames'" | Out-File $soakLog -Append
     if ($null -ne $p -and $null -ne $lastProgress -and $p -eq $lastProgress) { $stuckSamples++ } else { $stuckSamples = 0 }
     if ($stuckSamples -ge 2 -and -not $froze) {
       $froze = $true
