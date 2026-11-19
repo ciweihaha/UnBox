@@ -140,6 +140,26 @@ function Send-Key {
   Start-Sleep -Milliseconds 300
 }
 
+# Set-InputText 往输入框填中文：不要用 ValuePattern.SetValue——它不触发
+# Vue 的 v-model，框里有字、app 里还是空；剪贴板粘贴（0.9.16 轮验证过）才行。
+function Set-InputText {
+  param(
+    [System.Windows.Automation.AutomationElement]$Edit,
+    [string]$Text
+  )
+  if (-not $Edit) { return $false }
+  try { $Edit.SetFocus() } catch { }
+  Start-Sleep -Milliseconds 300
+  [System.Windows.Forms.Clipboard]::SetText($Text)
+  [System.Windows.Forms.SendKeys]::SendWait('^a')
+  [System.Windows.Forms.SendKeys]::SendWait('^v')
+  Start-Sleep -Milliseconds 500
+  try {
+    $v = $Edit.GetCurrentPattern($script:ValuePattern).Value
+    return ($v -eq $Text)
+  } catch { return $true }
+}
+
 function Move-Mouse {
   param([int]$X, [int]$Y)
   [NativeInput]::SetCursorPos($X, $Y) | Out-Null

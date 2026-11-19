@@ -77,25 +77,57 @@ function Go-Mode {
 
 function Get-WindowRect { return (Get-ElementRect $script:Win) }
 
+# Search-Vod 在搜索页搜片名、点进第一个同名结果：输入必须用剪贴板粘贴
+#（SetValue 不触发 Vue v-model，搜不到）；搜全网最多等 30 秒。
+function Search-Vod {
+  param([string]$Query)
+  Go-Mode 'search' | Out-Null
+  Start-Sleep -Seconds 1
+  $box = $null
+  $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  foreach ($e in $all) {
+    try { if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Edit') { $box = $e; break } } catch { }
+  }
+  if (-not $box) { return $false }
+  Set-InputText -Edit $box -Text $Query | Out-Null
+  Send-Key '{ENTER}'
+  $hit = Wait-For { Find-Element -Root $script:Win -Name $Query } -Seconds 30
+  if (-not $hit) { return $false }
+  Invoke-Element $hit | Out-Null
+  Start-Sleep -Seconds 4
+  return $true
+}
+
 function Get-PlayerProgress {
-  # 播放器进度：.ctrl-seek 是 range input，UIA 里是 Slider（RangeValuePattern）；
-  # 兜底读 .ctrl-time 文本“mm:ss / mm:ss”。
-  $slider = $null
+  # 播放器进度：优先读 .ctrl-time 文本“mm:ss / mm:ss”（直播的 range
+  # input 值恒为 0，读它永远是 0；文本才是真实进度）。
   $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
   foreach ($e in $all) {
     try {
-      if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Slider') { $slider = $e; break }
+      $n = $e.Current.Name
+      if ($n -match '^(\d+):(\d+) / ') { return ([int]$Matches[1]) * 60 + [int]$Matches[2] }
     } catch { }
   }
-  if ($slider) {
-    try { return [double]($slider.GetCurrentPattern($script:RangePattern).Value) } catch { }
-  }
-  $t = Find-Element -Root $script:Win -Name ' / '
-  if ($t) {
-    $txt = Get-ElementText $t
-    if ($txt -match '(\d+):(\d+)') { return ([int]$Matches[1]) * 60 + [int]$Matches[2] }
+  # 兜底：.ctrl-seek 是 range input，UIA 里是 Slider（RangeValuePattern）。
+  foreach ($e in $all) {
+    try {
+      if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Slider') {
+        return [double]($e.GetCurrentPattern($script:RangePattern).Value)
+      }
+    } catch { }
   }
   return $null
+}
+
+function Wait-PlayerProgress {
+  param([int]$Seconds = 20)
+  $end = (Get-Date).AddSeconds($Seconds)
+  while ((Get-Date) -lt $end) {
+    $p = Get-PlayerProgress
+    if ($null -ne $p -and $p -gt 0) { return $p }
+    Start-Sleep -Seconds 2
+  }
+  return (Get-PlayerProgress)
 }
 
 function Find-PlayerGroup {
@@ -273,31 +305,38 @@ Go-Mode 'live' | Out-Null
 Start-Sleep -Seconds 3
 $wr = Get-WindowRect
 $liveList = Find-Element -Root $script:Win -Name 'CCTV'
+Test-WheelScrolls -Id 'T12' -Name '滚轮：直播列表能滚' -X ([int]($wr.X + 200)) -Y ([int]($wr.Y + $wr.Height / 2))
+Shot -Tag 'live' | Out-Null
+# 先点第一行播起来（播放器、进度条都是播后才出现），再量两栏与播放区。
+$firstRow = Find-Element -Root $script:Win -Name 'CCTV-1'
+if (-not $firstRow) { $firstRow = Find-Element -Root $script:Win -Name 'CCTV' }
+if ($firstRow) { Invoke-Element $firstRow | Out-Null }
+$p0 = Wait-PlayerProgress -Seconds 20
 $playerGroup = Find-PlayerGroup
 $pgRect = Get-ElementRect $playerGroup
 Add-Result -Id 'T14' -Name '直播两栏：左列表右播放' -Pass (($null -ne $liveList) -and ($null -ne $playerGroup)) -Evidence "list=$($null -ne $liveList) playerW=$($pgRect.Width)"
 Add-Result -Id 'T18' -Name '直播页铺满（播放区高≥500）' -Pass ($pgRect -and $pgRect.Height -ge 500) -Evidence "playerH=$($pgRect.Height)"
-# 星标对齐：所有收藏星按钮 x 应在同一列（误差≤5px）。
+# 星标对齐：取频道行里的收藏按钮（名字是 ★/☆，但按名字找不可靠），
+# 按位置量——所有按钮的 x 应在同一列（误差≤5px）。
 $stars = @()
+$all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
 foreach ($e in $all) {
   try {
-    if (($e.Current.Name -eq '★' -or $e.Current.Name -eq '☆') -and $e.Current.ControlType.ProgrammaticName -eq 'ControlType.Button') {
-      $r = $e.Current.BoundingRectangle
-      if ($r.X -gt $wr.X -and $r.X -lt ($wr.X + 500)) { $stars += $r.X }
+    if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.ListItem' -and $e.Current.Name -match '^CCTV') {
+      $subs = $e.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+      foreach ($s in $subs) {
+        try {
+          if ($s.Current.ControlType.ProgrammaticName -eq 'ControlType.Button') { $stars += $s.Current.BoundingRectangle.X }
+        } catch { }
+      }
     }
   } catch { }
 }
 $starSpread = 0
 if ($stars.Count -ge 2) { $starSpread = ($stars | Measure-Object -Maximum).Maximum - ($stars | Measure-Object -Minimum).Minimum }
 Add-Result -Id 'T15' -Name '直播星标统一在行右端' -Pass ($stars.Count -ge 2 -and $starSpread -le 5) -Evidence "stars=$($stars.Count) spread=$starSpread"
-Test-WheelScrolls -Id 'T12' -Name '滚轮：直播列表能滚' -X ([int]($wr.X + 200)) -Y ([int]($wr.Y + $wr.Height / 2))
-Shot -Tag 'live' | Out-Null
-# 点第一行播，进度 5 秒内前进。
-$firstRow = Find-Element -Root $script:Win -Name 'CCTV-1'
-if (-not $firstRow) { $firstRow = Find-Element -Root $script:Win -Name 'CCTV' }
-if ($firstRow) { Invoke-Element $firstRow | Out-Null }
-Start-Sleep -Seconds 3
-$p1 = Get-PlayerProgress
+# 进度前进：p0 是起播后等到的首个 >0 进度，再过 5 秒应更大。
+$p1 = $p0
 Start-Sleep -Seconds 5
 $p2 = Get-PlayerProgress
 Add-Result -Id 'T16' -Name '直播点播后进度前进' -Pass ($null -ne $p1 -and $null -ne $p2 -and $p2 -gt $p1) -Evidence "p1=$p1 p2=$p2"
@@ -317,41 +356,30 @@ Add-Result -Id 'T17b' -Name '直播空格继续（进度恢复）' -Pass ($null 
 Shot -Tag 'live-playing' | Out-Null
 
 # ---------- 点播：搜荒野求生进详情 ----------
-Go-Mode 'search' | Out-Null
-Start-Sleep -Seconds 1
-$searchBox = $null
-$all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-foreach ($e in $all) {
-  try { if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Edit') { $searchBox = $e; break } } catch { }
-}
-if ($searchBox) {
-  try { $searchBox.GetCurrentPattern($script:ValuePattern).SetValue('荒野求生') } catch { }
-  Send-Key '{ENTER}'
-  Start-Sleep -Seconds 5
-  $hit = Wait-For { Find-Element -Root $script:Win -Name '荒野求生' } -Seconds 20
-  if ($hit) { Invoke-Element $hit | Out-Null; Start-Sleep -Seconds 4 }
-}
-$detailPlayer = Find-PlayerGroup
-$dpRect = Get-ElementRect $detailPlayer
-Add-Result -Id 'T30' -Name '详情是整页（播放区宽≥700）' -Pass ($null -ne $detailPlayer) -Evidence "playerW=$($dpRect.Width) playerH=$($dpRect.Height)"
-Shot -Tag 'detail-manvs' | Out-Null
+$foundManvs = Search-Vod -Query '荒野求生'
 # 线路按钮友好名。
 $lineBtns = Find-Elements -Root $script:Win -NameLike '线路*'
 $rawIds = Find-Elements -Root $script:Win -NameLike '*m3u8*'
 Add-Result -Id 'T21' -Name '详情线路显示友好名（线路N）' -Pass ($lineBtns.Count -ge 1 -and $rawIds.Count -eq 0) -Evidence "friendly=$($lineBtns.Count) rawIds=$($rawIds.Count)"
 # 选集按钮更大：量第一个“第*集”按钮的高度。
 $epBtn = $null
+$all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
 foreach ($e in $all) {
   try { if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $e.Current.Name -match '^第.*集$') { $epBtn = $e; break } } catch { }
 }
 $epRect = Get-ElementRect $epBtn
 Add-Result -Id 'T22' -Name '选集按钮做大（高≥30）' -Pass ($epRect -and $epRect.Height -ge 30) -Evidence "epBtnH=$($epRect.Height)"
 # 点播空格暂停。
-if ($epBtn) { Invoke-Element $epBtn | Out-Null; Start-Sleep -Seconds 4 }
-$q1 = Get-PlayerProgress
+if ($epBtn) { Invoke-Element $epBtn | Out-Null }
+$q1 = Wait-PlayerProgress -Seconds 20
 Start-Sleep -Seconds 3
 $q2 = Get-PlayerProgress
 Add-Result -Id 'T29a' -Name '点播能播（进度前进）' -Pass ($null -ne $q1 -and $null -ne $q2 -and $q2 -gt $q1) -Evidence "q1=$q1 q2=$q2"
+# 详情是整页：点集播起来后才有播放器容器，播后再量。
+$detailPlayer = Find-PlayerGroup
+$dpRect = Get-ElementRect $detailPlayer
+Add-Result -Id 'T30' -Name '详情是整页（播放区宽≥700）' -Pass (($null -ne $detailPlayer) -and $dpRect.Width -ge 700) -Evidence "playerW=$($dpRect.Width) playerH=$($dpRect.Height)"
+Shot -Tag 'detail-manvs' | Out-Null
 Send-Key ' '
 Start-Sleep -Seconds 3
 $pausedText2 = Find-Element -Root $script:Win -Name '已暂停'
@@ -364,20 +392,7 @@ Start-Sleep -Seconds 2
 Shot -Tag 'detail-playing' | Out-Null
 
 # ---------- 小城良方：无选集回归 + 类似内容 ----------
-Go-Mode 'search' | Out-Null
-Start-Sleep -Seconds 1
-$searchBox = $null
-$all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-foreach ($e in $all) {
-  try { if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Edit') { $searchBox = $e; break } } catch { }
-}
-if ($searchBox) {
-  try { $searchBox.GetCurrentPattern($script:ValuePattern).SetValue('小城良方') } catch { }
-  Send-Key '{ENTER}'
-  Start-Sleep -Seconds 5
-  $hit = Wait-For { Find-Element -Root $script:Win -Name '小城良方' } -Seconds 20
-  if ($hit) { Invoke-Element $hit | Out-Null; Start-Sleep -Seconds 4 }
-}
+$foundXc = Search-Vod -Query '小城良方'
 $epBtns = @()
 $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
 foreach ($e in $all) {
@@ -453,17 +468,19 @@ Add-Result -Id 'T26' -Name '报错提示 5 秒自动消失' -Pass $toastPass -Ev
 Shot -Tag 'settings' | Out-Null
 
 # ---------- 设置：CF 下拉自动检测新源 + 字幕说明 ----------
-$cfCombo = $null
+# ThemedSelect 不是原生 ComboBox（UIA 里没有）：触发器是个 Button（名字是当前源），
+# 点开后选项以按钮/文本形式出现在弹窗里。
+$cfTrigger = $null
 $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
 foreach ($e in $all) {
   try {
-    if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.ComboBox') { $cfCombo = $e; break }
+    if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $e.Current.Name -match '聚合万能源|OrionTV|亚洲点播|正在用的源|手动输入') { $cfTrigger = $e; break }
   } catch { }
 }
-$cfEv = 'no-combobox'
+$cfEv = 'no-dropdown-trigger'
 $cfPass = $false
-if ($cfCombo) {
-  Expand-Element $cfCombo | Out-Null
+if ($cfTrigger) {
+  Invoke-Element $cfTrigger | Out-Null
   Start-Sleep -Seconds 2
   $opts = @()
   $all2 = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
@@ -512,9 +529,9 @@ foreach ($e in $all) {
   try { if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Edit') { $searchBox = $e; break } } catch { }
 }
 if ($searchBox) {
-  try { $searchBox.GetCurrentPattern($script:ValuePattern).SetValue('不存在的片名zzzz1234') } catch { }
+  Set-InputText -Edit $searchBox -Text '不存在的片名zzzz1234' | Out-Null
   Send-Key '{ENTER}'
-  $noRes = Wait-For { Find-Element -Root $script:Win -Name '暂无搜索结果' } -Seconds 20
+  $noRes = Wait-For { Find-Element -Root $script:Win -Name '暂无搜索结果' } -Seconds 30
   Add-Result -Id 'T32' -Name '搜不到时显示暂无结果（不卡死）' -Pass ($null -ne $noRes) -Evidence "noResultsShown=$($null -ne $noRes)"
 }
 Add-Result -Id 'T33' -Name '全程无悄悄退出' -Pass (Test-ProcessAlive -Id $script:AppPid) -Evidence "pid=$($script:AppPid) alive=$(Test-ProcessAlive -Id $script:AppPid)"

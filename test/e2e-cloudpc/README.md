@@ -41,6 +41,16 @@ Start-ScheduledTask -TaskName 'UB-E2E'
 - 进度用 `.ctrl-seek` 的 RangeValuePattern 读；读不到时退到 `.ctrl-time` 文本。
 - 报错 toast 的触发路径：设置页填一个连不上的点播源地址再点导入。
 - 测的时候留意“悄悄退出”：每步都查进程在不在，soak 每分钟记一次。
+- **搜索框填字必须用剪贴板粘贴**：ValuePattern.SetValue 不触发 Vue 的
+  v-model，框里有字、app 里还是空，搜不到；粘贴（`Set-InputText`）才行。
+- **进度读 `.ctrl-time` 文本**：直播的 range input 值恒为 0，读 slider
+  永远是 0；文本“mm:ss / mm:ss”才是真实进度。
+- **星标按位置找，不要按名字**：★/☆ 按钮的名字在 UIA 里不稳定，
+  按频道行里的按钮 x 坐标量对齐。
+- **ThemedSelect 不是原生 ComboBox**：触发器是个 Button（名字是当前源），
+  点开后选项在弹窗里；别找 ControlType.ComboBox。
+- **先播再量播放器**：播放器容器、进度条都是播后才出现，没点台/没点集
+  时 Find-PlayerGroup 必然是空。
 - **旧进程污染（0.9.17 轮踩到）**：上一轮的 UB916-Launch 任务把 0.9.16 包
   留在后台跑，脚本按窗口名找会测到旧窗口。脚本启动前先杀掉所有
   `UnBox*` 进程，并按窗口句柄反查 pid、只认本次启动的窗口；
