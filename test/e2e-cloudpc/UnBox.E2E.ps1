@@ -95,7 +95,18 @@ function Search-Vod {
     Send-Key '{ENTER}'
     $hit = Wait-For { Find-Element -Root $script:Win -Name $Query } -Seconds 30
     if ($hit) {
-      Invoke-ElementOrAncestor $hit | Out-Null
+      # 别点到搜索历史小按钮（名字也是查询词、只有 26px 高）：只点卡片
+      #（结果卡片高 200+）；历史按钮点开只会重搜，进不了详情。
+      $card = $null
+      $cands = Find-Elements -Root $script:Win -NameLike "*$Query*"
+      foreach ($c in $cands) {
+        try {
+          $r = $c.Current.BoundingRectangle
+          if ($r.Height -ge 40) { $card = $c; break }
+        } catch { }
+      }
+      if (-not $card) { $card = $hit }
+      Invoke-ElementOrAncestor $card | Out-Null
       Start-Sleep -Seconds 4
       return $true
     }
@@ -488,11 +499,18 @@ Shot -Tag 'settings' | Out-Null
 # ThemedSelect 不是原生 ComboBox（UIA 里没有）：触发器按钮的名字是
 # aria-label（“Cloudflare 点播源”），可见的源名是里面的 span；
 # 点开后选项是 role=option 的按钮，名字就是源名。
-$cfTrigger = Find-Element -Root $script:Win -Name 'Cloudflare 点播源'
+$cfTrigger = $null
+$all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+foreach ($e in $all) {
+  try {
+    # 触发器按钮的名字就是 aria-label；别直接按名字找，会先撞到旁边的 label 文本。
+    if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $e.Current.Name -eq 'Cloudflare 点播源') { $cfTrigger = $e; break }
+  } catch { }
+}
 $cfEv = 'no-dropdown-trigger'
 $cfPass = $false
 if ($cfTrigger) {
-  Invoke-Element $cfTrigger | Out-Null
+  $opened = Invoke-Element $cfTrigger
   Start-Sleep -Seconds 2
   $opts = @()
   $all2 = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
@@ -505,7 +523,7 @@ if ($cfTrigger) {
   $opts = $opts | Sort-Object -Unique
   $has3 = (($opts | Where-Object { $_ -match '聚合万能源' }).Count -ge 1) -and (($opts | Where-Object { $_ -match 'OrionTV' }).Count -ge 1) -and (($opts | Where-Object { $_ -match '亚洲点播' }).Count -ge 1)
   $cfPass = $has3
-  $cfEv = "options='$($opts -join ' | ')'"
+  $cfEv = "opened=$opened options='$($opts -join ' | ')'"
   Send-Key '{ESC}'
 }
 Add-Result -Id 'T28' -Name 'CF 下拉自动列出 3 个目录源' -Pass $cfPass -Evidence $cfEv

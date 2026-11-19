@@ -152,19 +152,39 @@ function Send-Key {
   Start-Sleep -Milliseconds 300
 }
 
+function Click-At {
+  param([int]$X, [int]$Y)
+  Move-Mouse -X $X -Y $Y
+  [NativeInput]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+  [NativeInput]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 300
+}
+
 # Set-InputText 往输入框填中文：不要用 ValuePattern.SetValue——它不触发
 # Vue 的 v-model，框里有字、app 里还是空；剪贴板粘贴（0.9.16 轮验证过）才行。
+# 粘贴前先鼠标点一下框中心拿焦点（UIA SetFocus 在 WebView2 里经常落不上）。
 function Set-InputText {
   param(
     [System.Windows.Automation.AutomationElement]$Edit,
     [string]$Text
   )
   if (-not $Edit) { return $false }
-  try { $Edit.SetFocus() } catch { }
+  try {
+    $r = $Edit.Current.BoundingRectangle
+    Click-At -X ([int]($r.X + $r.Width / 2)) -Y ([int]($r.Y + $r.Height / 2))
+  } catch { }
   Start-Sleep -Milliseconds 300
   [System.Windows.Forms.Clipboard]::SetText($Text)
   [System.Windows.Forms.SendKeys]::SendWait('^a')
   [System.Windows.Forms.SendKeys]::SendWait('^v')
+  Start-Sleep -Milliseconds 500
+  try {
+    $v = $Edit.GetCurrentPattern($script:ValuePattern).Value
+    if ($v -eq $Text) { return $true }
+  } catch { }
+  # 粘贴没进：退到键盘逐字打（SendKeys 直接发 Unicode 字符）。
+  try { $Edit.SetFocus() } catch { }
+  [System.Windows.Forms.SendKeys]::SendWait($Text)
   Start-Sleep -Milliseconds 500
   try {
     $v = $Edit.GetCurrentPattern($script:ValuePattern).Value
