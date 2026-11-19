@@ -79,23 +79,31 @@ function Get-WindowRect { return (Get-ElementRect $script:Win) }
 
 # Search-Vod 在搜索页搜片名、点进第一个同名结果：输入必须用剪贴板粘贴
 #（SetValue 不触发 Vue v-model，搜不到）；搜全网最多等 30 秒。
+# 搜不到结果或没出结果时重导航再试一次（导航点击偶尔 miss）。
 function Search-Vod {
   param([string]$Query)
-  Go-Mode 'search' | Out-Null
-  Start-Sleep -Seconds 1
-  $box = $null
-  $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-  foreach ($e in $all) {
-    try { if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Edit') { $box = $e; break } } catch { }
+  for ($attempt = 1; $attempt -le 2; $attempt++) {
+    Go-Mode 'search' | Out-Null
+    Start-Sleep -Seconds 1
+    $box = $null
+    $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    foreach ($e in $all) {
+      try { if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Edit') { $box = $e; break } } catch { }
+    }
+    if (-not $box) { continue }
+    Set-InputText -Edit $box -Text $Query | Out-Null
+    Send-Key '{ENTER}'
+    $hit = Wait-For { Find-Element -Root $script:Win -Name $Query } -Seconds 30
+    if ($hit) {
+      Invoke-ElementOrAncestor $hit | Out-Null
+      Start-Sleep -Seconds 4
+      return $true
+    }
+    # 没出结果：可能还在搜，也可能根本没搜出来；再等一次“暂无搜索结果”。
+    $noRes = Find-Element -Root $script:Win -Name '暂无搜索结果'
+    if ($noRes) { return $false }
   }
-  if (-not $box) { return $false }
-  Set-InputText -Edit $box -Text $Query | Out-Null
-  Send-Key '{ENTER}'
-  $hit = Wait-For { Find-Element -Root $script:Win -Name $Query } -Seconds 30
-  if (-not $hit) { return $false }
-  Invoke-Element $hit | Out-Null
-  Start-Sleep -Seconds 4
-  return $true
+  return $false
 }
 
 function Get-PlayerProgress {
@@ -336,10 +344,19 @@ $starSpread = 0
 if ($stars.Count -ge 2) { $starSpread = ($stars | Measure-Object -Maximum).Maximum - ($stars | Measure-Object -Minimum).Minimum }
 Add-Result -Id 'T15' -Name '直播星标统一在行右端' -Pass ($stars.Count -ge 2 -and $starSpread -le 5) -Evidence "stars=$($stars.Count) spread=$starSpread"
 # 进度前进：p0 是起播后等到的首个 >0 进度，再过 5 秒应更大。
+# 直播流偶尔会重启一次（进度归 0 再涨）：p2 没涨时多等 3 秒再读 p3，
+# 只要最后在涨就算过（T17 会再验暂停/继续）。
 $p1 = $p0
 Start-Sleep -Seconds 5
 $p2 = Get-PlayerProgress
-Add-Result -Id 'T16' -Name '直播点播后进度前进' -Pass ($null -ne $p1 -and $null -ne $p2 -and $p2 -gt $p1) -Evidence "p1=$p1 p2=$p2"
+$pass16 = ($null -ne $p1 -and $null -ne $p2 -and $p2 -gt $p1)
+if (-not $pass16) {
+  $p1 = Get-PlayerProgress
+  Start-Sleep -Seconds 3
+  $p2 = Get-PlayerProgress
+  $pass16 = ($null -ne $p1 -and $null -ne $p2 -and $p2 -gt $p1)
+}
+Add-Result -Id 'T16' -Name '直播点播后进度前进' -Pass $pass16 -Evidence "p1=$p1 p2=$p2"
 # 空格暂停/继续。
 Send-Key ' '
 Start-Sleep -Seconds 3
@@ -468,15 +485,10 @@ Add-Result -Id 'T26' -Name '报错提示 5 秒自动消失' -Pass $toastPass -Ev
 Shot -Tag 'settings' | Out-Null
 
 # ---------- 设置：CF 下拉自动检测新源 + 字幕说明 ----------
-# ThemedSelect 不是原生 ComboBox（UIA 里没有）：触发器是个 Button（名字是当前源），
-# 点开后选项以按钮/文本形式出现在弹窗里。
-$cfTrigger = $null
-$all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-foreach ($e in $all) {
-  try {
-    if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $e.Current.Name -match '聚合万能源|OrionTV|亚洲点播|正在用的源|手动输入') { $cfTrigger = $e; break }
-  } catch { }
-}
+# ThemedSelect 不是原生 ComboBox（UIA 里没有）：触发器按钮的名字是
+# aria-label（“Cloudflare 点播源”），可见的源名是里面的 span；
+# 点开后选项是 role=option 的按钮，名字就是源名。
+$cfTrigger = Find-Element -Root $script:Win -Name 'Cloudflare 点播源'
 $cfEv = 'no-dropdown-trigger'
 $cfPass = $false
 if ($cfTrigger) {

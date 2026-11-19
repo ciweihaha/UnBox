@@ -113,6 +113,18 @@ function Invoke-Element {
   } catch { return $false }
 }
 
+# Invoke-ElementOrAncestor：卡片标题是纯文本（点不动），往上找可点的祖先再点。
+function Invoke-ElementOrAncestor {
+  param([System.Windows.Automation.AutomationElement]$El)
+  if (-not $El) { return $false }
+  $cur = $El
+  for ($i = 0; $i -lt 4 -and $cur; $i++) {
+    if (Invoke-Element $cur) { return $true }
+    try { $cur = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($cur) } catch { $cur = $null }
+  }
+  return $false
+}
+
 function Expand-Element {
   param([System.Windows.Automation.AutomationElement]$El)
   if (-not $El) { return $false }
