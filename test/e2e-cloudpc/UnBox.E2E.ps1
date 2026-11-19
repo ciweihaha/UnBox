@@ -171,7 +171,7 @@ if (-not (Test-Path $ExePath)) { throw "找不到测试包：$ExePath" }
 Stop-UnBoxProcesses
 $proc = Start-Process -FilePath $ExePath -WorkingDirectory (Split-Path $ExePath -Parent) -PassThru
 $script:AppPid = $proc.Id
-$script:Win = Wait-For { Get-UnBoxWindowForPid -Pid $script:AppPid } -Seconds 60
+$script:Win = Wait-For { Get-UnBoxWindowForPid -ProcessId $script:AppPid } -Seconds 60
 if (-not $script:Win) { $script:Win = Wait-For { Get-UnBoxWindow } -Seconds 10 }
 Add-Result -Id 'T01' -Name '应用启动，窗口出现（属于本次启动的进程）' -Pass ($null -ne $script:Win) -Evidence "pid=$($script:AppPid) window=$($null -ne $script:Win)"
 if (-not $script:Win) { throw '窗口 60 秒内没出现' }

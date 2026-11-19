@@ -46,13 +46,13 @@ function Get-WindowOwnerPid {
 # Get-UnBoxWindowForPid 只认属于指定进程的 UnBox 窗口：云电脑上可能残留
 # 旧版进程（0.9.16 轮的 UB916-Launch 就留了一个），按名字找会测到旧窗口。
 function Get-UnBoxWindowForPid {
-  param([int]$Pid)
+  param([int]$ProcessId)
   $cond = New-Object System.Windows.Automation.PropertyCondition($script:NameProp, 'UnBox')
   $wins = $script:AE::RootElement.FindAll($script:TreeScope::Children, $cond)
   foreach ($w in $wins) {
     try {
       $h = $w.Current.NativeWindowHandle
-      if ($h -and (Get-WindowOwnerPid -Handle ([IntPtr]$h)) -eq $Pid) { return $w }
+      if ($h -and (Get-WindowOwnerPid -Handle ([IntPtr]$h)) -eq $ProcessId) { return $w }
     } catch { }
   }
   return $null

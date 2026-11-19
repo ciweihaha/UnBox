@@ -8,7 +8,7 @@ $proc = Start-Process -FilePath 'C:\temp\unbox0917\UnBox-0.9.17-test.exe' -Worki
 "pid: $($proc.Id)" | Out-File $out -Append
 $win = $null
 $end = (Get-Date).AddSeconds(60)
-while ((Get-Date) -lt $end -and -not $win) { $win = Get-UnBoxWindowForPid -Pid $proc.Id; Start-Sleep -Milliseconds 500 }
+while ((Get-Date) -lt $end -and -not $win) { $win = Get-UnBoxWindowForPid -ProcessId $proc.Id; Start-Sleep -Milliseconds 500 }
 "window: $($null -ne $win)" | Out-File $out -Append
 if (-not $win) { "no window" | Out-File $out -Append; exit 1 }
 
