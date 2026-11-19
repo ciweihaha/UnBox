@@ -113,7 +113,6 @@ function Invoke-Element {
   } catch { return $false }
 }
 
-# Invoke-ElementOrAncestor：卡片标题是纯文本（点不动），往上找可点的祖先再点。
 function Invoke-ElementOrAncestor {
   param([System.Windows.Automation.AutomationElement]$El)
   if (-not $El) { return $false }
@@ -123,6 +122,39 @@ function Invoke-ElementOrAncestor {
     try { $cur = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($cur) } catch { $cur = $null }
   }
   return $false
+}
+
+# Find-ChannelRow 找直播频道行：必须拿 ListItem 本身。行里的台名文本
+# （ControlType.Text）和行同名，Find-Element 会先撞到文本，点它没用。
+function Find-ChannelRow {
+  param(
+    [System.Windows.Automation.AutomationElement]$Root,
+    [string]$NameLike
+  )
+  if (-not $Root) { return $null }
+  $all = $Root.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  foreach ($e in $all) {
+    try {
+      if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.ListItem' -and $e.Current.Name -like $NameLike) { return $e }
+    } catch { }
+  }
+  return $null
+}
+
+function Find-ChannelRows {
+  param(
+    [System.Windows.Automation.AutomationElement]$Root,
+    [string]$NameLike = '*CCTV*'
+  )
+  $out = @()
+  if (-not $Root) { return $out }
+  $all = $Root.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  foreach ($e in $all) {
+    try {
+      if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.ListItem' -and $e.Current.Name -like $NameLike) { $out += $e }
+    } catch { }
+  }
+  return $out
 }
 
 function Expand-Element {

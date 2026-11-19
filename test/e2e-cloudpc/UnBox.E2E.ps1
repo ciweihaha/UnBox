@@ -335,17 +335,17 @@ Test-WheelScrolls -Id 'T12' -Name '滚轮：直播列表能滚' -X ([int]($wr.X 
 Shot -Tag 'live' | Out-Null
 # 先点第一行播起来（播放器、进度条都是播后才出现），再量两栏与播放区。
 # CCTV-1 偶尔起不来（源不稳）：20 秒没进度就换 CCTV-2 再试，记下用的台。
-$firstRow = Find-Element -Root $script:Win -Name 'CCTV-1'
-if (-not $firstRow) { $firstRow = Find-Element -Root $script:Win -Name 'CCTV' }
+$firstRow = Find-ChannelRow -Root $script:Win -NameLike '*CCTV综合*'
+if (-not $firstRow) { $firstRow = Find-ChannelRow -Root $script:Win -NameLike '*CCTV*' }
 if ($firstRow) { Invoke-Element $firstRow | Out-Null }
 $p0 = Wait-PlayerProgress -Seconds 20
-$liveChannelUsed = 'CCTV-1'
+$liveChannelUsed = 'CCTV综合'
 if ($null -eq $p0 -or $p0 -le 0) {
-  $secondRow = Find-Element -Root $script:Win -Name 'CCTV-2'
+  $secondRow = Find-ChannelRow -Root $script:Win -NameLike '*CCTV财经*'
   if ($secondRow) {
     Invoke-Element $secondRow | Out-Null
     $p0 = Wait-PlayerProgress -Seconds 20
-    $liveChannelUsed = 'CCTV-2'
+    $liveChannelUsed = 'CCTV财经'
   }
 }
 $playerGroup = Find-PlayerGroup
@@ -571,22 +571,30 @@ Shot -Tag 'settings-cf' | Out-Null
 # ---------- 隐藏 bug 探查：反复切换 + 异常路径 ----------
 $switchOk = $true
 $switchEv = ''
+$switchChanged = 0
 Go-Mode 'live' | Out-Null
 Start-Sleep -Seconds 2
 for ($i = 0; $i -lt 10; $i++) {
-  $rows = @()
-  $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-  foreach ($e in $all) {
-    try { if ($e.Current.Name -match '^CCTV') { $rows += $e } } catch { }
-  }
+  $rows = Find-ChannelRows -Root $script:Win -NameLike '*CCTV*'
   if ($rows.Count -ge 2) {
-    Invoke-Element $rows[$i % $rows.Count] | Out-Null
-    Start-Sleep -Milliseconds 700
+    $target = $rows[$i % $rows.Count]
+    $before = ''
+    $st = Find-Element -Root $script:Win -Name '正在播放'
+    if ($st) { $before = $st.Current.Name }
+    Invoke-Element $target | Out-Null
+    # 切台要真换台：等状态文本变成另一台才算成功（只看进程活着不够）。
+    $changed = Wait-For {
+      $s = Find-Element -Root $script:Win -Name '正在播放'
+      $s -and ($s.Current.Name -ne $before)
+    } -Seconds 10
+    if ($changed) { $switchChanged++ }
+    Start-Sleep -Milliseconds 300
   }
   if (-not (Test-ProcessAlive -Id $script:AppPid)) { $switchOk = $false; $switchEv = "died at switch $i"; break }
 }
-if ($switchOk) { $switchEv = '10 switches, process alive' }
-Add-Result -Id 'T31' -Name '反复切台 10 次不崩' -Pass $switchOk -Evidence $switchEv
+if ($switchOk) { $switchEv = "$switchChanged/10 switches changed channel, process alive" }
+$switchOk = $switchOk -and ($switchChanged -ge 8)
+Add-Result -Id 'T31' -Name '反复切台 10 次不崩且真换台' -Pass $switchOk -Evidence $switchEv
 # 空搜索：输一个不存在的片名，应显示“暂无搜索结果”而不是卡死/报错。
 Go-Mode 'search' | Out-Null
 Start-Sleep -Seconds 1
@@ -607,8 +615,8 @@ Add-Result -Id 'T33' -Name '全程无悄悄退出' -Pass (Test-ProcessAlive -Id 
 if ($SoakMinutes -gt 0) {
   Go-Mode 'live' | Out-Null
   Start-Sleep -Seconds 2
-  $firstRow = Find-Element -Root $script:Win -Name 'CCTV-1'
-  if (-not $firstRow) { $firstRow = Find-Element -Root $script:Win -Name 'CCTV' }
+  $firstRow = Find-ChannelRow -Root $script:Win -NameLike '*CCTV综合*'
+  if (-not $firstRow) { $firstRow = Find-ChannelRow -Root $script:Win -NameLike '*CCTV*' }
   if ($firstRow) { Invoke-Element $firstRow | Out-Null }
   Start-Sleep -Seconds 5
   $soakLog = Join-Path $OutDir 'soak.log'
