@@ -19,6 +19,7 @@ public static class NativeInput {
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, int dwData, UIntPtr dwExtraInfo);
   public const uint MOUSEEVENTF_WHEEL = 0x0800;
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 }
 "@
 
@@ -33,6 +34,35 @@ $script:ScrollPattern = [System.Windows.Automation.ScrollPattern]::Pattern
 function Get-UnBoxWindow {
   $cond = New-Object System.Windows.Automation.PropertyCondition($script:NameProp, 'UnBox')
   return $script:AE::RootElement.FindFirst($script:TreeScope::Children, $cond)
+}
+
+function Get-WindowOwnerPid {
+  param([IntPtr]$Handle)
+  $pidOut = 0
+  [void][NativeInput]::GetWindowThreadProcessId($Handle, [ref]$pidOut)
+  return $pidOut
+}
+
+# Get-UnBoxWindowForPid 只认属于指定进程的 UnBox 窗口：云电脑上可能残留
+# 旧版进程（0.9.16 轮的 UB916-Launch 就留了一个），按名字找会测到旧窗口。
+function Get-UnBoxWindowForPid {
+  param([int]$Pid)
+  $cond = New-Object System.Windows.Automation.PropertyCondition($script:NameProp, 'UnBox')
+  $wins = $script:AE::RootElement.FindAll($script:TreeScope::Children, $cond)
+  foreach ($w in $wins) {
+    try {
+      $h = $w.Current.NativeWindowHandle
+      if ($h -and (Get-WindowOwnerPid -Handle ([IntPtr]$h)) -eq $Pid) { return $w }
+    } catch { }
+  }
+  return $null
+}
+
+function Stop-UnBoxProcesses {
+  Get-Process | Where-Object { $_.Name -like 'UnBox*' } | ForEach-Object {
+    try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch { }
+  }
+  Start-Sleep -Seconds 2
 }
 
 function Find-Element {

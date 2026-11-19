@@ -41,3 +41,19 @@ Start-ScheduledTask -TaskName 'UB-E2E'
 - 进度用 `.ctrl-seek` 的 RangeValuePattern 读；读不到时退到 `.ctrl-time` 文本。
 - 报错 toast 的触发路径：设置页填一个连不上的点播源地址再点导入。
 - 测的时候留意“悄悄退出”：每步都查进程在不在，soak 每分钟记一次。
+- **旧进程污染（0.9.17 轮踩到）**：上一轮的 UB916-Launch 任务把 0.9.16 包
+  留在后台跑，脚本按窗口名找会测到旧窗口。脚本启动前先杀掉所有
+  `UnBox*` 进程，并按窗口句柄反查 pid、只认本次启动的窗口；
+  `Get-Process UnBox` 是精确匹配，查不到改名后的包，一定要用通配。
+- **+dirty 的深层根因（0.9.17 轮查到）**：仓库的 go.mod 不是 tidy 状态、
+  图标是旧版 wails 生成的，每次构建 `go mod tidy` 和 `generate:icons`
+  都会弄脏树，内部版本永远带 +dirty。修法：提交 tidy 后的 go.mod/go.sum
+  和 wails 3.1.0 生成的图标（已验证两台机器字节一致），以后构建是复写。
+- **浅克隆没有 tag**：`git clone --depth 1` 拉不到 tag，Go 伪版本会变成
+  `v0.0.0-时间-commit`；云电脑的克隆要 `git fetch --unshallow --tags`。
+- **脚本编码**：.ps1 必须是 UTF-8 带 BOM，否则云电脑 PowerShell 5.1
+  按 ANSI 解码，中文/★☆ 会解析失败。另：`$PID` 是只读自动变量，
+  别拿它当变量名；`"MIN $m: ..."` 里 `$m:` 会被当成带盘符的变量，要写 `${m}`。
+- **云电脑构建**：`proxy.golang.org` 连不上，构建脚本里设
+  `GOPROXY=https://mirrors.aliyun.com/goproxy,direct` + `GOSUMDB=off`；
+  GitHub 直链慢，下载走 `gh-proxy.com`（ghfast.top 从云电脑不通）。

@@ -16,6 +16,7 @@ param(
   [string]$ExePath = 'C:\temp\unbox0917\UnBox-0.9.17-test.exe',
   [string]$OutDir = 'C:\temp\unbox0917',
   [int]$SoakMinutes = 0,
+  [string]$ExpectedVersion = '0.9.17',
   [switch]$Probe
 )
 
@@ -97,6 +98,25 @@ function Get-PlayerProgress {
   return $null
 }
 
+function Find-PlayerGroup {
+  # 播放器容器：含进度条（Slider 子孙）的 Group；按宽度猜会撞到主窗口本身。
+  $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  foreach ($e in $all) {
+    try {
+      if ($e.Current.ControlType.ProgrammaticName -ne 'ControlType.Group') { continue }
+      $r = $e.Current.BoundingRectangle
+      if ($r.Width -lt 300 -or $r.Height -lt 150) { continue }
+      $subs = $e.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+      foreach ($s in $subs) {
+        try {
+          if ($s.Current.ControlType.ProgrammaticName -eq 'ControlType.Slider') { return $e }
+        } catch { }
+      }
+    } catch { }
+  }
+  return $null
+}
+
 function Get-ScrollPercentAt {
   param([int]$X, [int]$Y)
   $pt = New-Object System.Windows.Point($X, $Y)
@@ -146,10 +166,14 @@ function Test-WheelScrolls {
 
 # ---------- 启动 ----------
 if (-not (Test-Path $ExePath)) { throw "找不到测试包：$ExePath" }
+# 先清掉残留的旧版进程（0.9.16 轮的 UB916-Launch 留了一个在跑），
+# 否则按窗口名找会测到旧窗口。
+Stop-UnBoxProcesses
 $proc = Start-Process -FilePath $ExePath -WorkingDirectory (Split-Path $ExePath -Parent) -PassThru
 $script:AppPid = $proc.Id
-$script:Win = Wait-For { Get-UnBoxWindow } -Seconds 60
-Add-Result -Id 'T01' -Name '应用启动，窗口出现' -Pass ($null -ne $script:Win) -Evidence "pid=$($script:AppPid) window=$($null -ne $script:Win)"
+$script:Win = Wait-For { Get-UnBoxWindowForPid -Pid $script:AppPid } -Seconds 60
+if (-not $script:Win) { $script:Win = Wait-For { Get-UnBoxWindow } -Seconds 10 }
+Add-Result -Id 'T01' -Name '应用启动，窗口出现（属于本次启动的进程）' -Pass ($null -ne $script:Win) -Evidence "pid=$($script:AppPid) window=$($null -ne $script:Win)"
 if (-not $script:Win) { throw '窗口 60 秒内没出现' }
 Start-Sleep -Seconds 3
 $wr = Get-WindowRect
@@ -182,9 +206,14 @@ if ($aboutTitle) {
   $verText = if ($verEl) { Get-ElementText $verEl } else { '' }
   $curEl = Find-Element -Root $script:Win -Name '当前版本'
   $curText = if ($curEl) { Get-ElementText $curEl } else { '' }
-  $clean = ($verText -match 'v\d+\.\d+\.\d+$') -and ($verText -notmatch '\+dirty')
+  # 当前版本走 ldflags 注入：构建时 VERSION 是多少就该是多少。
+  $curOk = $curText -match [regex]::Escape($ExpectedVersion)
+  Add-Result -Id 'T03a' -Name "关于：当前版本是 $ExpectedVersion" -Pass $curOk -Evidence "current='$curText'"
+  # 内部版本走 Go 伪版本：发版前是 vX.Y.Z-0.时间.commit 形式；关键是不能带 +dirty
+  #（树干净时没有；构建弄脏树——go mod tidy/图标重生成/版本 sed——就会带上）。
+  $clean = ($verText -notmatch '\+dirty') -and ($verText -match 'v\d+\.\d+')
   $verEvidence = "internal='$verText' current='$curText'"
-  Add-Result -Id 'T03' -Name '关于：内部版本干净（无 +dirty）' -Pass $clean -Evidence $verEvidence
+  Add-Result -Id 'T03b' -Name '关于：内部版本干净（无 +dirty）' -Pass $clean -Evidence $verEvidence
   # 关闭 × 位置：应在弹窗右上角（x 大于窗口中心）。
   $closeBtn = Find-Element -Root $script:Win -Name '✕'
   $closeRect = Get-ElementRect $closeBtn
@@ -218,7 +247,8 @@ public static class Clicker { [DllImport("user32.dll")] public static extern voi
     Add-Result -Id 'T06' -Name '关于：点遮罩关闭' -Pass $false -Evidence '重开关于失败'
   }
 } else {
-  Add-Result -Id 'T03' -Name '关于：内部版本干净（无 +dirty）' -Pass $false -Evidence $verEvidence
+  Add-Result -Id 'T03a' -Name "关于：当前版本是 $ExpectedVersion" -Pass $false -Evidence $verEvidence
+  Add-Result -Id 'T03b' -Name '关于：内部版本干净（无 +dirty）' -Pass $false -Evidence $verEvidence
   Add-Result -Id 'T04' -Name '关于：关闭 × 在右上角' -Pass $false -Evidence $verEvidence
   Add-Result -Id 'T05' -Name '关于：Esc 关闭' -Pass $false -Evidence $verEvidence
   Add-Result -Id 'T06' -Name '关于：点遮罩关闭' -Pass $false -Evidence $verEvidence
@@ -243,13 +273,7 @@ Go-Mode 'live' | Out-Null
 Start-Sleep -Seconds 3
 $wr = Get-WindowRect
 $liveList = Find-Element -Root $script:Win -Name 'CCTV'
-$playerGroup = $null
-$all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-foreach ($e in $all) {
-  try {
-    if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Group' -and $e.Current.BoundingRectangle.Width -gt 800) { $playerGroup = $e; break }
-  } catch { }
-}
+$playerGroup = Find-PlayerGroup
 $pgRect = Get-ElementRect $playerGroup
 Add-Result -Id 'T14' -Name '直播两栏：左列表右播放' -Pass (($null -ne $liveList) -and ($null -ne $playerGroup)) -Evidence "list=$($null -ne $liveList) playerW=$($pgRect.Width)"
 Add-Result -Id 'T18' -Name '直播页铺满（播放区高≥500）' -Pass ($pgRect -and $pgRect.Height -ge 500) -Evidence "playerH=$($pgRect.Height)"
@@ -307,13 +331,7 @@ if ($searchBox) {
   $hit = Wait-For { Find-Element -Root $script:Win -Name '荒野求生' } -Seconds 20
   if ($hit) { Invoke-Element $hit | Out-Null; Start-Sleep -Seconds 4 }
 }
-$detailPlayer = $null
-$all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-foreach ($e in $all) {
-  try {
-    if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Group' -and $e.Current.BoundingRectangle.Width -gt 700) { $detailPlayer = $e; break }
-  } catch { }
-}
+$detailPlayer = Find-PlayerGroup
 $dpRect = Get-ElementRect $detailPlayer
 Add-Result -Id 'T30' -Name '详情是整页（播放区宽≥700）' -Pass ($null -ne $detailPlayer) -Evidence "playerW=$($dpRect.Width) playerH=$($dpRect.Height)"
 Shot -Tag 'detail-manvs' | Out-Null
