@@ -148,12 +148,15 @@ function Get-StatusNames {
 }
 
 function Get-PlayerProgress {
-  # 播放器进度：优先读 .ctrl-time 文本“mm:ss / mm:ss”（直播的 range
-  # input 值恒为 0，读它永远是 0；文本才是真实进度）。
+  # 播放器进度：优先读 .ctrl-time 文本。文本是“mm:ss / mm:ss”，
+  # 但播超过 1 小时的流（直播长播流）会变成“h:mm:ss / …”，
+  # 旧正则 ^(\d+):(\d+) / 只认 mm:ss，h:mm:ss 会读不到（回落到 Slider，
+  # 直播的 Slider 值恒为 0），于是能播的台也被判死。先认 h:mm:ss 再认 mm:ss。
   $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
   foreach ($e in $all) {
     try {
       $n = $e.Current.Name
+      if ($n -match '^(\d+):(\d+):(\d+) / ') { return ([int]$Matches[1]) * 3600 + ([int]$Matches[2]) * 60 + [int]$Matches[3] }
       if ($n -match '^(\d+):(\d+) / ') { return ([int]$Matches[1]) * 60 + [int]$Matches[2] }
     } catch { }
   }
@@ -630,10 +633,11 @@ Add-Result -Id 'T30' -Name '详情是整页（播放区宽≥700）' -Pass (($nu
 # 顶 = 行顶、底 = 行底。信息栏容器本身 UIA 不暴露，用两处量：
 # 栏内 h2 标题顶（栏顶 + 12px 内边距）≈ 播放器顶（±24，“正在播放”行约 28px，
 # 播放器顶含这行，h2 顶不含，所以差值约 -16，容差放宽到 24 才稳）；
-# 选集区首个线路页签顶（行底 + 16px 间距）− 播放器底 ≈ 16（±10）。
-# 上下叠放时两处都会差出几百像素。$dpRect 必须是播放器列（最大且不是整页
-# 容器的含 Slider Group，见 Find-PlayerViewGroup）：最深的 Group 是视频子
-# 元素（底短 19px），最外层是整页容器（约等于视口），拿它俩量都会恒错。
+# 选集区首个线路页签顶（行底 + 16px 间距）− 播放器底 ≈ 35（±10）。
+# 量到的是视频区（Find-PlayerViewGroup 返回的最大非页面含 Slider Group，
+# 725×363），它的底比播放器列底短约 19px（下面还有控制条），所以期望
+# gap 是 16（grid 间距）+ 19（控制条）= 35，不是 16；两轮实测都是 35。
+# 上下叠放时两处都会差出几百像素。
 $wr = Get-WindowRect
 $titleEls = Find-Elements -Root $script:Win -NameLike '荒野求生*'
 $h2Rect = $null
@@ -644,7 +648,7 @@ if ($tabBtns.Count -ge 1) { $tabRect = Get-ElementRect $tabBtns[0] }
 $topOk = $h2Rect -and [Math]::Abs($h2Rect.Y - $dpRect.Y) -le 24
 $botGap = $null
 if ($tabRect) { $botGap = $tabRect.Y - ($dpRect.Y + $dpRect.Height) }
-$botOk = ($null -ne $botGap) -and [Math]::Abs($botGap - 16) -le 10
+$botOk = ($null -ne $botGap) -and [Math]::Abs($botGap - 35) -le 10
 # 布局诊断：把窗口、所有“荒野求生*”元素、线路页签、类似内容标题的矩形都
 # 记下来，下次直接看是布局没对齐还是量到了错的元素。
 $layoutEv = "win=$($wr.X),$($wr.Y) $($wr.Width)x$($wr.Height)"
