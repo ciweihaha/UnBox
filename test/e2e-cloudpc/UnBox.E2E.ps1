@@ -109,8 +109,13 @@ function Search-Vod {
       }
       if (-not $card) { $card = $hit }
       Invoke-ElementOrAncestor $card | Out-Null
-      Start-Sleep -Seconds 4
-      return $true
+      # 等详情打开：详情要调聚合接口，冷启动几秒才出来，别只睡 4 秒就判。
+      $opened = Wait-For {
+        ($null -ne (Find-Element -Root $script:Win -Name '更多类似内容')) -or
+        ((Find-Elements -Root $script:Win -NameLike '第*集*').Count -ge 1) -or
+        ((Find-Elements -Root $script:Win -NameLike '线路*').Count -ge 1)
+      } -Seconds 30
+      if ($opened) { return $true }
     }
     # 没出结果：可能还在搜，也可能根本没搜出来；再等一次“暂无搜索结果”。
     $noRes = Find-Element -Root $script:Win -Name '暂无搜索结果'
@@ -514,8 +519,10 @@ Shot -Tag 'settings' | Out-Null
 $cfTrigger = $null
 $opened = $false
 # 设置页会异步重渲染（CF 目录拉到后下拉框重建），缓存的元素可能过期：
-# 每次重找、最多试 3 次。
-for ($try = 1; $try -le 3 -and -not $opened; $try++) {
+# 每次重找、最多试 5 次；先滚到顶，免得触发器在折叠区域外。
+Move-Mouse -X ([int]($wr.X + $wr.Width / 2)) -Y ([int]($wr.Y + 300))
+Send-Wheel -Delta 1200 -Clicks 3
+for ($try = 1; $try -le 5 -and -not $opened; $try++) {
   $cfTrigger = $null
   $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
   foreach ($e in $all) {
@@ -544,6 +551,17 @@ if ($opened) {
   $cfPass = $has3
   $cfEv = "opened=$opened options='$($opts -join ' | ')'"
   Send-Key '{ESC}'
+}
+if (-not $opened) {
+  # 还是打不开：把设置页所有按钮名记下来，下次就知道触发器到底叫什么。
+  $btnNames = @()
+  $all3 = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  foreach ($e in $all3) {
+    try {
+      if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $e.Current.Name) { $btnNames += $e.Current.Name }
+    } catch { }
+  }
+  $cfEv = "no-dropdown-trigger buttons='$($btnNames -join ' | ')'"
 }
 Add-Result -Id 'T28' -Name 'CF 下拉自动列出 3 个目录源' -Pass $cfPass -Evidence $cfEv
 $subHint = Find-Element -Root $script:Win -Name '字幕翻译'
