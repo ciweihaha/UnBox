@@ -28,10 +28,20 @@ Set-Location $RepoRoot
 # 原生命令：stdout/stderr 分写文件，返回退出码（不走 2>&1，见文件头注释）。
 # 参数别叫 $Args：它和自动变量 $Args 冲突，@Args 展开为空，命令会无参运行
 #（wails3 出 help、go 出 usage——2026-11-20 01:26 构建就是这么死的）。
+# 调用期间 $ErrorActionPreference 临时改回 Continue：这台 PS 5.1 上即使
+# stderr 已重定向到文件，原生命令的 stderr 文本仍会变成终止错误
+#（wails3 version 的 "v3.1.0" 就走 stderr——2026-11-20 01:34 构建死在这里）；
+# 改回 Continue 后只记一条非终止错误，退出码照常可用。
 function Invoke-Native {
   param([string]$Exe, [string[]]$CmdArgs, [string]$OutLog)
   $errLog = "$OutLog.err"
-  & $Exe @CmdArgs > $OutLog 2> $errLog
+  $oldEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & $Exe @CmdArgs > $OutLog 2> $errLog
+  } finally {
+    $ErrorActionPreference = $oldEap
+  }
   $code = $LASTEXITCODE
   if ((Test-Path $errLog) -and (Get-Item $errLog).Length -gt 0) {
     Get-Content $errLog -Raw | Out-File $OutLog -Encoding utf8 -Append
