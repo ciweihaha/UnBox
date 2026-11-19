@@ -82,6 +82,7 @@ function Get-WindowRect { return (Get-ElementRect $script:Win) }
 # 搜不到结果或没出结果时重导航再试一次（导航点击偶尔 miss）。
 function Search-Vod {
   param([string]$Query)
+  $script:SearchDiag = ''
   for ($attempt = 1; $attempt -le 2; $attempt++) {
     Go-Mode 'search' | Out-Null
     Start-Sleep -Seconds 1
@@ -93,21 +94,26 @@ function Search-Vod {
     if (-not $box) { continue }
     Set-InputText -Edit $box -Text $Query | Out-Null
     Send-Key '{ENTER}'
-    $hit = Wait-For { Find-Element -Root $script:Win -Name $Query } -Seconds 30
-    if ($hit) {
-      # 点卡片：名字是查询词的元素里有搜索历史小按钮（26px 高的 Button），
-      # 点它只会重搜、进不了详情；跳过小按钮，从标题文本往上找卡片容器再点。
-      $card = $null
+    # 等结果卡片：不要只等一个同名元素——搜索历史 chip 也叫这个名，
+    # 会立刻命中、让脚本在卡片出来前就点了 chip（第三轮就是这么丢的）。
+    # 轮询等一张非小按钮的卡片（结果 2.8 秒就回来，但渲染要再等一下）。
+    $card = $null
+    $cardEnd = (Get-Date).AddSeconds(30)
+    while ((Get-Date) -lt $cardEnd -and -not $card) {
       $cands = Find-Elements -Root $script:Win -NameLike "*$Query*"
       foreach ($c in $cands) {
         try {
           $r = $c.Current.BoundingRectangle
           if ($c.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $r.Height -lt 40) { continue }
+          $card = $c; break
         } catch { continue }
-        $card = $c
-        break
       }
-      if (-not $card) { $card = $hit }
+      if (-not $card) {
+        if (Find-Element -Root $script:Win -Name '暂无搜索结果') { break }
+        Start-Sleep -Seconds 2
+      }
+    }
+    if ($card) {
       Invoke-ElementOrAncestor $card | Out-Null
       # 等详情打开：详情要调聚合接口，冷启动几秒才出来，别只睡 4 秒就判。
       $opened = Wait-For {
@@ -115,8 +121,15 @@ function Search-Vod {
         ((Find-Elements -Root $script:Win -NameLike '第*集*').Count -ge 1) -or
         ((Find-Elements -Root $script:Win -NameLike '线路*').Count -ge 1)
       } -Seconds 30
-      if ($opened) { return $true }
+      if ($opened) { $script:SearchDiag = ''; return $true }
     }
+    # 诊断：这次到底看到了什么候选（名/类型/矩形），下次 0 卡片时直接看。
+    $diag = @()
+    $cands2 = Find-Elements -Root $script:Win -NameLike "*$Query*"
+    foreach ($c in $cands2) {
+      try { $r2 = $c.Current.BoundingRectangle; $diag += "'$($c.Current.Name)' $($c.Current.ControlType.ProgrammaticName) $($r2.Width)x$($r2.Height)" } catch { }
+    }
+    $script:SearchDiag = "attempt=$attempt cands='$($diag -join ' | ')'"
     # 没出结果：可能还在搜，也可能根本没搜出来；再等一次“暂无搜索结果”。
     $noRes = Find-Element -Root $script:Win -Name '暂无搜索结果'
     if ($noRes) { return $false }
@@ -446,7 +459,7 @@ $detailOpenedEv = "found=$foundManvs signals='$($detailSignals -join ',')'"
 # 线路按钮友好名。
 $lineBtns = Find-Elements -Root $script:Win -NameLike '线路*'
 $rawIds = Find-Elements -Root $script:Win -NameLike '*m3u8*'
-Add-Result -Id 'T21' -Name '详情线路显示友好名（线路N）' -Pass ($lineBtns.Count -ge 1 -and $rawIds.Count -eq 0) -Evidence "friendly=$($lineBtns.Count) rawIds=$($rawIds.Count) $detailOpenedEv"
+Add-Result -Id 'T21' -Name '详情线路显示友好名（线路N）' -Pass ($lineBtns.Count -ge 1 -and $rawIds.Count -eq 0) -Evidence "friendly=$($lineBtns.Count) rawIds=$($rawIds.Count) $detailOpenedEv diag=$($script:SearchDiag)"
 # 选集按钮更大：量第一个“第*集”按钮的高度。
 $epBtn = $null
 $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
@@ -764,6 +777,8 @@ if ($SoakMinutes -gt 0) {
   $stuckSamples = 0
   $froze = $false
   $recovered = $false
+  $unresolvedFreeze = $false
+  $lastAdvanceMin = 0
   $soakPass = $true
   $everPlayed = ($null -ne $lastProgress -and $lastProgress -gt 0)
   $nullStreak = 0
@@ -786,11 +801,10 @@ if ($SoakMinutes -gt 0) {
     $stNames = Get-StatusNames
     "MIN $m $(Get-Date -Format 'HH:mm:ss') progress=$p reconnecting=$reconnecting wv2=$wvCount mpv=$mpvCount uia=$uiaCount status='$stNames'" | Out-File $soakLog -Append
     if ($null -ne $p) { $everPlayed = $true; $nullStreak = 0 } else { $nullStreak++ }
-    # 播着播着彻底没进度（源站死了且 5 分钟没恢复）：不是“冻住恢复”，
-    # 是播放丢了，直接判不通过；别像首跑那样读空 20 分钟还“通过”。
+    if ($null -ne $p -and $null -ne $lastProgress -and $p -gt $lastProgress) { $lastAdvanceMin = $m }
+    # 播着播着彻底没进度：只记下来，到结束还在死播才判不通过（见结尾）。
     if ($nullStreak -ge 5 -and -not $lostPlayback) {
       $lostPlayback = $true
-      $soakPass = $false
       "MIN ${m}: PLAYBACK LOST (no progress for 5 min)" | Out-File $soakLog -Append
     }
     if ($null -ne $p -and $null -ne $lastProgress -and $p -eq $lastProgress) { $stuckSamples++ } else { $stuckSamples = 0 }
@@ -803,13 +817,24 @@ if ($SoakMinutes -gt 0) {
       $reconnecting2 = $null -ne (Find-Element -Root $script:Win -Name '正在重连')
       "MIN ${m}: after 60s progress=$p2 reconnecting=$reconnecting2" | Out-File $soakLog -Append
       if ($null -ne $p2 -and $p2 -gt $p) { $recovered = $true; $stuckSamples = 0; $froze = $false }
-      else { $soakPass = $false }
+      else {
+        # 60 秒没恢复：先不判死——源站中断几分钟是常事（CCTV 中继常 403），
+        # 只要到浸泡结束时自己恢复过来（不需人动手）就算过；到结束还在死播才不通过。
+        $unresolvedFreeze = $true
+        "MIN ${m}: STILL FROZEN after 60s (source may be down, keep watching)" | Out-File $soakLog -Append
+      }
     }
     $lastProgress = $p
   }
   if (-not $soakChannel) { $soakPass = $false }
-  $ev = "minutes=$SoakMinutes froze=$froze recovered=$recovered processAlive=$(Test-ProcessAlive -Id $script:AppPid) channel='$soakChannel' dead='$($soakDead -join ' | ')' everPlayed=$everPlayed lostPlayback=$lostPlayback"
-  Add-Result -Id 'T34' -Name "连续播放 ${SoakMinutes} 分钟不冻住（冻住 60 秒内自动恢复也算过）" -Pass ($soakPass -and $everPlayed) -Evidence $ev
+  # 终判：进程活着、播过、且到结束时进度还在前进（最近 2 分钟内前进过），
+  # 冻住只要最后自己恢复过来就算过——60 秒窗口量的是源站中断时长，
+  # 不是 app；到结束还在死播（或进程没了、或根本没播过）才不通过。
+  $endAlive = Test-ProcessAlive -Id $script:AppPid
+  $playingAtEnd = ($SoakMinutes - $lastAdvanceMin) -le 2
+  $soakPass = $soakPass -and $endAlive -and $everPlayed -and $playingAtEnd -and [bool]$soakChannel
+  $ev = "minutes=$SoakMinutes froze=$froze recovered=$recovered unresolvedFreeze=$unresolvedFreeze processAlive=$endAlive channel='$soakChannel' dead='$($soakDead -join ' | ')' everPlayed=$everPlayed lostPlayback=$lostPlayback lastAdvanceMin=$lastAdvanceMin playingAtEnd=$playingAtEnd"
+  Add-Result -Id 'T34' -Name "连续播放 ${SoakMinutes} 分钟不冻住（冻住自己恢复就算过）" -Pass $soakPass -Evidence $ev
   Shot -Tag 'soak-end' | Out-Null
 }
 
