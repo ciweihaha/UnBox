@@ -1215,7 +1215,9 @@ async function play(c: ChannelInfo, quiet = false) {
   errMsg.value = ''
   currentVod.value = null
   currentLiveChannel.value = c
-  liveReconnectAttempts.value = 0
+  // 只在用户手动切台时清重连预算；自动重连那次（quiet）不清，
+  // 否则“最多 3 次”的预算每次重连都被清零、永远触不到上限。
+  if (!quiet) liveReconnectAttempts.value = 0
   if (liveReconnectTimer.value !== null) {
     clearTimeout(liveReconnectTimer.value)
     liveReconnectTimer.value = null
@@ -1239,27 +1241,26 @@ async function play(c: ChannelInfo, quiet = false) {
     livePlaybackPlan.value = plan
     livePlaybackToken.value = token
     livePlaybackStatus.value = 'playing'
+    // 重连成功：预算清零，下一次冻住是新的一轮，最多再试 3 次。
+    liveReconnectAttempts.value = 0
   } catch (e) {
     if (isCurrentPlayback('live', token)) {
       livePlaybackPlan.value = null
       livePlaybackToken.value = 0
+      // 重连中起播又失败（比如源站 403）：也算一次重连尝试，预算内
+      // 继续重连；预算用完才停在报错上。用户刚点的台失败直接报错。
+      if (quiet && scheduleLiveReconnect(c)) return
       livePlaybackStatus.value = 'error'
       setLivePlaybackError(String(e))
     }
   }
 }
 
-// onLiveStalled 处理直播冻住：进度不动已由 PlaybackView 的停滞检测报上来。
-// 预算内自动重拉当前台（2 秒间隔，最多 3 次），重连中显示“正在重连…”；
-// 预算用完仍不通就停在报错上，让用户换台。用户已手动切台时不再动作。
-function onLiveStalled() {
-  const c = currentLiveChannel.value
-  if (!c || livePlaybackStatus.value !== 'playing') return
-  if (liveReconnectAttempts.value >= LIVE_RECONNECT_MAX) {
-    livePlaybackStatus.value = 'error'
-    setLivePlaybackError('频道信号中断，请换台试试')
-    return
-  }
+// scheduleLiveReconnect 安排一次直播重连：预算内（最多 3 次、2 秒间隔）
+// 自动重拉当前台，重连中显示“正在重连…”；预算用完返回 false，调用方
+// 停在报错上。冻住和起播失败都走这里，预算共用。
+function scheduleLiveReconnect(c: ChannelInfo): boolean {
+  if (liveReconnectAttempts.value >= LIVE_RECONNECT_MAX) return false
   liveReconnectAttempts.value++
   livePlaybackStatus.value = 'reconnecting'
   flashLiveToast(`信号中断，正在重连（第 ${liveReconnectAttempts.value} 次）…`)
@@ -1268,6 +1269,18 @@ function onLiveStalled() {
     liveReconnectTimer.value = null
     if (livePlaybackStatus.value === 'reconnecting') void play(c, true)
   }, LIVE_RECONNECT_DELAY_MS)
+  return true
+}
+
+// onLiveStalled 处理直播冻住：进度不动已由 PlaybackView 的停滞检测报上来。
+// 预算内自动重拉当前台；预算用完仍不通就停在报错上，让用户换台。
+// 用户已手动切台时不再动作。
+function onLiveStalled() {
+  const c = currentLiveChannel.value
+  if (!c || livePlaybackStatus.value !== 'playing') return
+  if (scheduleLiveReconnect(c)) return
+  livePlaybackStatus.value = 'error'
+  setLivePlaybackError('频道信号中断，请换台试试')
 }
 
 // onVodStalled 处理点播冻住：自动换源开着就走已有换线逻辑，关着只报一次

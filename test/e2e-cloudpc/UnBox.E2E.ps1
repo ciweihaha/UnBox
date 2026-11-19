@@ -481,7 +481,17 @@ $topOk = $h2Rect -and [Math]::Abs($h2Rect.Y - $dpRect.Y) -le 16
 $botGap = $null
 if ($tabRect) { $botGap = $tabRect.Y - ($dpRect.Y + $dpRect.Height) }
 $botOk = ($null -ne $botGap) -and [Math]::Abs($botGap - 16) -le 10
-Add-Result -Id 'T29b' -Name '详情左右等高（信息栏与播放区顶底对齐）' -Pass ($topOk -and $botOk) -Evidence "h2Top=$($h2Rect.Y) playerTop=$($dpRect.Y) tabTop=$($tabRect.Y) playerBottom=$($dpRect.Y + $dpRect.Height) gap=$botGap"
+# 布局诊断：把窗口、所有“荒野求生*”元素、线路页签、类似内容标题的矩形都
+# 记下来，下次直接看是布局没对齐还是量到了错的元素。
+$layoutEv = "win=$($wr.X),$($wr.Y) $($wr.Width)x$($wr.Height)"
+foreach ($e in $titleEls) {
+  $r = Get-ElementRect $e
+  if ($r) { try { $layoutEv += " | title '$($e.Current.Name)' $($e.Current.ControlType.ProgrammaticName) $($r.X),$($r.Y) $($r.Width)x$($r.Height)" } catch { } }
+}
+if ($tabBtns.Count -ge 1) { try { $layoutEv += " | tab '$($tabBtns[0].Current.Name)'" } catch { } }
+$simHead = Find-Element -Root $script:Win -Name '更多类似内容'
+if ($simHead) { $sr = Get-ElementRect $simHead; if ($sr) { $layoutEv += " | similarHead $($sr.X),$($sr.Y) $($sr.Width)x$($sr.Height)" } }
+Add-Result -Id 'T29b' -Name '详情左右等高（信息栏与播放区顶底对齐）' -Pass ($topOk -and $botOk) -Evidence "h2Top=$($h2Rect.Y) playerTop=$($dpRect.Y) tabTop=$($tabRect.Y) playerBottom=$($dpRect.Y + $dpRect.Height) gap=$botGap | $layoutEv"
 Shot -Tag 'detail-manvs' | Out-Null
 Send-Key ' '
 Start-Sleep -Seconds 3
@@ -496,12 +506,21 @@ Shot -Tag 'detail-playing' | Out-Null
 
 # ---------- 小城良方：无选集回归 + 类似内容 ----------
 $foundXc = Search-Vod -Query '小城良方'
+# 选集是详情聚合回来后才出的，Search-Vod 只要见到“线路”就返回，选集可能
+# 还在路上：轮询等 15 秒，别刚回来就判 0。found 记下来，下次 0 选集时
+# 才分得清是“搜不到/没进详情”还是“进了详情但没选集”。
 $epBtns = @()
-$all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-foreach ($e in $all) {
-  try { if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $e.Current.Name -match '^第.*集$') { $epBtns += $e } } catch { }
+$epEnd = (Get-Date).AddSeconds(15)
+while ((Get-Date) -lt $epEnd -and $epBtns.Count -eq 0) {
+  $epBtns = @()
+  $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  foreach ($e in $all) {
+    try { if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $e.Current.Name -match '^第.*集$') { $epBtns += $e } } catch { }
+  }
+  if ($epBtns.Count -eq 0) { Start-Sleep -Seconds 3 }
 }
-Add-Result -Id 'T23' -Name '小城良方详情有选集按钮' -Pass ($epBtns.Count -ge 1) -Evidence "episodeButtons=$($epBtns.Count)"
+$similarExistsXc = $null -ne (Find-Element -Root $script:Win -Name '更多类似内容')
+Add-Result -Id 'T23' -Name '小城良方详情有选集按钮' -Pass ($epBtns.Count -ge 1) -Evidence "episodeButtons=$($epBtns.Count) found=$foundXc similarTitle=$similarExistsXc"
 Shot -Tag 'detail-xiaocheng' | Out-Null
 # 类似内容：不同片名。类似区是详情落地后才后台去全网找的（浏览同类
 # 分类、最多 10 秒 + 回落搜索），标题先出来、卡片后到：轮询等卡片出现。
@@ -538,7 +557,7 @@ if ($similarTitle) {
 }
 $distinct = ($similarCards | Sort-Object -Unique)
 $sameTitle = ($similarCards | Where-Object { $_ -like '*小城良方*' }).Count
-Add-Result -Id 'T24' -Name '更多类似内容是不同片名' -Pass ($distinct.Count -ge 3 -and $sameTitle -eq 0) -Evidence "cards=$($similarCards.Count) distinct=$($distinct.Count) sameTitle=$sameTitle distinctList='$($distinct -join ' | ')'"
+Add-Result -Id 'T24' -Name '更多类似内容是不同片名' -Pass ($distinct.Count -ge 3 -and $sameTitle -eq 0) -Evidence "cards=$($similarCards.Count) distinct=$($distinct.Count) sameTitle=$sameTitle similarTitle=$($null -ne $similarTitle) distinctList='$($distinct -join ' | ')'"
 # 首跑 cardW=151：CSS 里类似卡片是 120px、详情海报是 150px，第一个量到的
 # 可能是海报而不是卡片，所以把全部卡宽都记下来，看 151 是个例还是整行都宽。
 Add-Result -Id 'T25' -Name '类似内容卡片收窄（宽≤140）' -Pass ($null -ne $similarCardW -and $similarCardW -le 140) -Evidence "cardW=$similarCardW allWidths='$($similarCardWs -join ',')'"
@@ -713,18 +732,43 @@ Add-Result -Id 'T33' -Name '全程无悄悄退出' -Pass (Test-ProcessAlive -Id 
 if ($SoakMinutes -gt 0) {
   Go-Mode 'live' | Out-Null
   Start-Sleep -Seconds 2
-  $firstRow = Find-ChannelRow -Root $script:Win -NameLike '*CCTV综合*'
-  if (-not $firstRow) { $firstRow = Find-ChannelRow -Root $script:Win -NameLike '*CCTV*' }
-  if ($firstRow) { Invoke-Element $firstRow | Out-Null }
-  Start-Sleep -Seconds 5
   $soakLog = Join-Path $OutDir 'soak.log'
   "soak start $(Get-Date -Format 'HH:mm:ss') pid=$($script:AppPid)" | Out-File $soakLog
+  # 浸泡测的是 app 本身，不是源站：先找一条真能播的台。CCTV-1 曾 403 半小时
+  # （源站中断），死守它会白白浪费 30 分钟；按顺序试 CCTV 各台（最多 5 台，
+  # 每台等 30 秒），播起来的才开始计时，死台记进日志。
+  $soakChannel = ''
+  $soakDead = @()
+  $rows = Find-ChannelRows -Root $script:Win -NameLike '*CCTV*'
+  $ordered = @()
+  $seen = @()
+  foreach ($r in $rows) { try { $n = $r.Current.Name; if ($n -like '*CCTV综合*') { $ordered += $r; $seen += $n } } catch { } }
+  foreach ($r in $rows) { try { $n = $r.Current.Name; if ($seen -notcontains $n) { $ordered += $r; $seen += $n } } catch { } }
+  $tried = 0
+  foreach ($row in $ordered) {
+    if ($tried -ge 5 -or $soakChannel) { break }
+    $tried++
+    $nm = ''
+    try { $nm = $row.Current.Name } catch { }
+    Invoke-Element $row | Out-Null
+    $p0 = Wait-PlayerProgress -Seconds 30
+    if ($null -ne $p0 -and $p0 -gt 0) { $soakChannel = $nm; "soak channel '$nm' playing (progress=$p0)" | Out-File $soakLog -Append; break }
+    $st0 = Get-StatusNames
+    $soakDead += $nm
+    "soak channel '$nm' DEAD status='$st0'" | Out-File $soakLog -Append
+  }
+  if (-not $soakChannel) {
+    "soak: NO working CCTV channel" | Out-File $soakLog -Append
+  }
   $lastProgress = Get-PlayerProgress
   $stuckSamples = 0
   $froze = $false
   $recovered = $false
   $soakPass = $true
-  for ($m = 1; $m -le $SoakMinutes; $m++) {
+  $everPlayed = ($null -ne $lastProgress -and $lastProgress -gt 0)
+  $nullStreak = 0
+  $lostPlayback = $false
+  for ($m = 1; $m -le $SoakMinutes -and $soakChannel; $m++) {
     Start-Sleep -Seconds 60
     if (-not (Test-ProcessAlive -Id $script:AppPid)) {
       "MIN ${m}: PROCESS GONE (silent exit)" | Out-File $soakLog -Append
@@ -741,6 +785,14 @@ if ($SoakMinutes -gt 0) {
     try { $uiaCount = ($script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)).Count } catch { }
     $stNames = Get-StatusNames
     "MIN $m $(Get-Date -Format 'HH:mm:ss') progress=$p reconnecting=$reconnecting wv2=$wvCount mpv=$mpvCount uia=$uiaCount status='$stNames'" | Out-File $soakLog -Append
+    if ($null -ne $p) { $everPlayed = $true; $nullStreak = 0 } else { $nullStreak++ }
+    # 播着播着彻底没进度（源站死了且 5 分钟没恢复）：不是“冻住恢复”，
+    # 是播放丢了，直接判不通过；别像首跑那样读空 20 分钟还“通过”。
+    if ($nullStreak -ge 5 -and -not $lostPlayback) {
+      $lostPlayback = $true
+      $soakPass = $false
+      "MIN ${m}: PLAYBACK LOST (no progress for 5 min)" | Out-File $soakLog -Append
+    }
     if ($null -ne $p -and $null -ne $lastProgress -and $p -eq $lastProgress) { $stuckSamples++ } else { $stuckSamples = 0 }
     if ($stuckSamples -ge 2 -and -not $froze) {
       $froze = $true
@@ -755,8 +807,9 @@ if ($SoakMinutes -gt 0) {
     }
     $lastProgress = $p
   }
-  $ev = "minutes=$SoakMinutes froze=$froze recovered=$recovered processAlive=$(Test-ProcessAlive -Id $script:AppPid)"
-  Add-Result -Id 'T34' -Name "连续播放 ${SoakMinutes} 分钟不冻住（冻住 60 秒内自动恢复也算过）" -Pass $soakPass -Evidence $ev
+  if (-not $soakChannel) { $soakPass = $false }
+  $ev = "minutes=$SoakMinutes froze=$froze recovered=$recovered processAlive=$(Test-ProcessAlive -Id $script:AppPid) channel='$soakChannel' dead='$($soakDead -join ' | ')' everPlayed=$everPlayed lostPlayback=$lostPlayback"
+  Add-Result -Id 'T34' -Name "连续播放 ${SoakMinutes} 分钟不冻住（冻住 60 秒内自动恢复也算过）" -Pass ($soakPass -and $everPlayed) -Evidence $ev
   Shot -Tag 'soak-end' | Out-Null
 }
 
