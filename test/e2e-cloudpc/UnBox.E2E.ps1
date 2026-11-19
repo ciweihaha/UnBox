@@ -26,7 +26,7 @@ if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir -Forc
 $script:Results = @()
 $script:Shots = 0
 $script:Win = $null
-$script:Pid = 0
+$script:AppPid = 0
 
 function Add-Result {
   param([string]$Id, [string]$Name, [bool]$Pass, [string]$Evidence, [string]$Note = '')
@@ -147,9 +147,9 @@ function Test-WheelScrolls {
 # ---------- 启动 ----------
 if (-not (Test-Path $ExePath)) { throw "找不到测试包：$ExePath" }
 $proc = Start-Process -FilePath $ExePath -WorkingDirectory (Split-Path $ExePath -Parent) -PassThru
-$script:Pid = $proc.Id
+$script:AppPid = $proc.Id
 $script:Win = Wait-For { Get-UnBoxWindow } -Seconds 60
-Add-Result -Id 'T01' -Name '应用启动，窗口出现' -Pass ($null -ne $script:Win) -Evidence "pid=$($script:Pid) window=$($null -ne $script:Win)"
+Add-Result -Id 'T01' -Name '应用启动，窗口出现' -Pass ($null -ne $script:Win) -Evidence "pid=$($script:AppPid) window=$($null -ne $script:Win)"
 if (-not $script:Win) { throw '窗口 60 秒内没出现' }
 Start-Sleep -Seconds 3
 $wr = Get-WindowRect
@@ -481,7 +481,7 @@ for ($i = 0; $i -lt 10; $i++) {
     Invoke-Element $rows[$i % $rows.Count] | Out-Null
     Start-Sleep -Milliseconds 700
   }
-  if (-not (Test-ProcessAlive -Id $script:Pid)) { $switchOk = $false; $switchEv = "died at switch $i"; break }
+  if (-not (Test-ProcessAlive -Id $script:AppPid)) { $switchOk = $false; $switchEv = "died at switch $i"; break }
 }
 if ($switchOk) { $switchEv = '10 switches, process alive' }
 Add-Result -Id 'T31' -Name '反复切台 10 次不崩' -Pass $switchOk -Evidence $switchEv
@@ -499,7 +499,7 @@ if ($searchBox) {
   $noRes = Wait-For { Find-Element -Root $script:Win -Name '暂无搜索结果' } -Seconds 20
   Add-Result -Id 'T32' -Name '搜不到时显示暂无结果（不卡死）' -Pass ($null -ne $noRes) -Evidence "noResultsShown=$($null -ne $noRes)"
 }
-Add-Result -Id 'T33' -Name '全程无悄悄退出' -Pass (Test-ProcessAlive -Id $script:Pid) -Evidence "pid=$($script:Pid) alive=$(Test-ProcessAlive -Id $script:Pid)"
+Add-Result -Id 'T33' -Name '全程无悄悄退出' -Pass (Test-ProcessAlive -Id $script:AppPid) -Evidence "pid=$($script:AppPid) alive=$(Test-ProcessAlive -Id $script:AppPid)"
 
 # ---------- 长时间播放（soak；只在 -SoakMinutes > 0 时跑） ----------
 if ($SoakMinutes -gt 0) {
@@ -510,7 +510,7 @@ if ($SoakMinutes -gt 0) {
   if ($firstRow) { Invoke-Element $firstRow | Out-Null }
   Start-Sleep -Seconds 5
   $soakLog = Join-Path $OutDir 'soak.log'
-  "soak start $(Get-Date -Format 'HH:mm:ss') pid=$($script:Pid)" | Out-File $soakLog
+  "soak start $(Get-Date -Format 'HH:mm:ss') pid=$($script:AppPid)" | Out-File $soakLog
   $lastProgress = Get-PlayerProgress
   $stuckSamples = 0
   $froze = $false
@@ -518,7 +518,7 @@ if ($SoakMinutes -gt 0) {
   $soakPass = $true
   for ($m = 1; $m -le $SoakMinutes; $m++) {
     Start-Sleep -Seconds 60
-    if (-not (Test-ProcessAlive -Id $script:Pid)) {
+    if (-not (Test-ProcessAlive -Id $script:AppPid)) {
       "MIN ${m}: PROCESS GONE (silent exit)" | Out-File $soakLog -Append
       $soakPass = $false; $froze = $true; break
     }
@@ -539,7 +539,7 @@ if ($SoakMinutes -gt 0) {
     }
     $lastProgress = $p
   }
-  $ev = "minutes=$SoakMinutes froze=$froze recovered=$recovered processAlive=$(Test-ProcessAlive -Id $script:Pid)"
+  $ev = "minutes=$SoakMinutes froze=$froze recovered=$recovered processAlive=$(Test-ProcessAlive -Id $script:AppPid)"
   Add-Result -Id 'T34' -Name "连续播放 ${SoakMinutes} 分钟不冻住（冻住 60 秒内自动恢复也算过）" -Pass $soakPass -Evidence $ev
   Shot -Tag 'soak-end' | Out-Null
 }
@@ -549,7 +549,7 @@ $passed = ($script:Results | Where-Object { $_.pass }).Count
 $total = $script:Results.Count
 $summary = @{
   exe = $ExePath
-  pid = $script:Pid
+  pid = $script:AppPid
   time = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
   soakMinutes = $SoakMinutes
   passed = $passed
@@ -562,7 +562,7 @@ $md = @()
 $md += "# UnBox 端到端测试报告（$($summary.time)）"
 $md += ""
 $md += "- 测试包：$ExePath"
-$md += "- 进程 pid：$($script:Pid)，soak：${SoakMinutes} 分钟"
+$md += "- 进程 pid：$($script:AppPid)，soak：${SoakMinutes} 分钟"
 $md += "- 结果：**$passed / $total 通过**"
 $md += ""
 $md += "| 编号 | 检查项 | 结果 | 证据 |"
