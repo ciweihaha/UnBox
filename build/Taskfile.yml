@@ -176,8 +176,9 @@ tasks:
   generate:bindings:
     summary: Generates bindings for the frontend
     run: once
-    deps:
-      - task: go:mod:tidy
+    # 注意：不要在这里依赖 go:mod:tidy——go.mod 里钉着升级用的间接依赖版本，
+    # tidy 会删钉、弄脏树，构建出的内部版本永远带 +dirty（v0.9.15/0.9.16 皆然）。
+    # 构建不需要 tidy（钉住的 go.mod 是超集，够编）；要升级依赖时手动跑 tidy 再提交。
     sources:
       - "**/*.[jt]s"
       - exclude: frontend/**/*
