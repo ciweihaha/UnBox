@@ -1,4 +1,4 @@
-# UnBox.Uia.ps1 — UnBox 云电脑端到端测试的 UIA 助手。
+﻿# UnBox.Uia.ps1 — UnBox 云电脑端到端测试的 UIA 助手。
 #
 # 用法：. .\UnBox.Uia.ps1
 # 在云电脑 session 1（交互会话）里跑：WinRM session 0 看不到桌面，
