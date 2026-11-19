@@ -28,6 +28,8 @@ func splitSources(from string) []string {
 // parseEpisodes 把 vod_play_url 拆成剧集列表。
 // playURL：线路间 $$$、集间 #、集名与地址间第一个 $。sources 为对应线路名。
 // 每条剧集的 ID 编码为 "<vodID>/<线路下标>/<集下标>"，供 Resolve 反查。
+// 无集名的裸地址（如单集电影只有一条 URL）默认叫「第N集」，免得详情页
+// 渲染出空白按钮、用户看不到可点的选集。
 func parseEpisodes(vodID, playURL string, sources []string) []provider.Episode {
 	var out []provider.Episode
 	for si, seg := range strings.Split(playURL, sourceSep) {
@@ -39,6 +41,9 @@ func parseEpisodes(vodID, playURL string, sources []string) []provider.Episode {
 			name, url := splitEpisode(ep)
 			if url == "" {
 				continue
+			}
+			if strings.TrimSpace(name) == "" {
+				name = fmt.Sprintf("第%d集", ei+1)
 			}
 			out = append(out, provider.Episode{
 				ID:     fmt.Sprintf("%s/%d/%d", vodID, si, ei),

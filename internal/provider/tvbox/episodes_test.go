@@ -80,9 +80,15 @@ func TestParseEpisodesEdgeCases(t *testing.T) {
 	if n := len(parseEpisodes("1", "", nil)); n != 0 {
 		t.Fatalf("空 playURL 应得 0 集, 实得 %d", n)
 	}
-	// 无名字的裸地址
+	// 无名字的裸地址：默认叫「第1集」，详情页有可点的选集按钮。
 	eps = parseEpisodes("1", "https://x/a.m3u8", nil)
-	if len(eps) != 1 || eps[0].Name != "" || eps[0].URL != "https://x/a.m3u8" {
+	if len(eps) != 1 || eps[0].Name != "第1集" || eps[0].URL != "https://x/a.m3u8" {
 		t.Fatalf("裸地址解析错误: %+v", eps)
+	}
+	// 多段 play_url 比线路名多：多出来的段仍归到空线路名下解析，不丢剧集；
+	// 前端按线路筛不到时会自动切到有剧集的线路（见 App.vue）。
+	eps = parseEpisodes("1", "第01集$a#第02集$b$$$第01集$c", []string{"x"})
+	if len(eps) != 3 || eps[2].Source != "" || eps[2].Name != "第01集" {
+		t.Fatalf("多段解析错误: %+v", eps)
 	}
 }

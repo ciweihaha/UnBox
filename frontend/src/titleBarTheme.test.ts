@@ -18,9 +18,10 @@ describe('标题栏跟背景色契约', () => {
   })
 
   it('换主题和启动加载主题时都同步标题栏颜色', () => {
-    // syncTitleBarColour 是唯一调 SetTitleBarColour 的地方；换主题和启动加载主题都要调它。
+    // syncTitleBarColour 是唯一调 SetTitleBarColour 的地方；换主题、启动加载主题、
+    // 启动后 1.5 秒重试（窗口刚建好时 DWM 可能还没准备好）都要调它。
     expect(app).toMatch(/async function syncTitleBarColour[\s\S]*?ShellService\.SetTitleBarColour\(/)
     const calls = app.match(/void syncTitleBarColour\(\)/g) ?? []
-    expect(calls.length).toBe(2)
+    expect(calls.length).toBe(3)
   })
 })

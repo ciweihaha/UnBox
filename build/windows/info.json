@@ -1,10 +1,10 @@
 {
 	"fixed": {
-		"file_version": "0.0.1"
+		"file_version": "0.9.17"
 	},
 	"info": {
 		"0000": {
-			"ProductVersion": "0.0.1",
+			"ProductVersion": "0.9.17",
 			"CompanyName": "RejectCode",
 			"FileDescription": "UnBox - 跨平台 TVBox 兼容播放器",
 			"LegalCopyright": "© 2026, RejectCode",

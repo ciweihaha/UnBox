@@ -32,14 +32,14 @@ describe('点播源目录解析', () => {
     expect(
       parseCfVodDirectory({
         sources: [
-          { name: '聚合万能源', url: 'https://live.ciweihaha.win/vod.json' },
-          { name: '聚合·37站', url: 'https://ysp.ciweihaha.win/agg' },
+          { name: '聚合万能源（44站合一·支持4K）', url: 'https://live.ciweihaha.win/vod.json' },
+          { name: 'OrionTV 聚合（38站）', url: 'https://ysp.ciweihaha.win/agg' },
           { name: '亚洲点播', url: 'https://ysp.ciweihaha.win/oktv-asia.json' },
         ],
       }),
     ).toEqual([
-      { name: '聚合万能源', url: 'https://live.ciweihaha.win/vod.json' },
-      { name: '聚合·37站', url: 'https://ysp.ciweihaha.win/agg' },
+      { name: '聚合万能源（44站合一·支持4K）', url: 'https://live.ciweihaha.win/vod.json' },
+      { name: 'OrionTV 聚合（38站）', url: 'https://ysp.ciweihaha.win/agg' },
       { name: '亚洲点播', url: 'https://ysp.ciweihaha.win/oktv-asia.json' },
     ])
   })
@@ -72,11 +72,11 @@ describe('点播源目录解析', () => {
     expect(parseCfVodDirectory({ sources: 'nope' })).toEqual([])
   })
 
-  it('目录里没有当前正在用的地址时追加“当前地址”，免得下拉框选不中', () => {
+  it('目录里没有当前正在用的地址时追加“正在用的源”，免得下拉框选不中', () => {
     const dir = [{ name: '甲', url: 'https://a.example/vod.json' }]
     expect(resolveCfVodSources(dir, 'https://b.example/vod.json')).toEqual([
       { name: '甲', url: 'https://a.example/vod.json' },
-      { name: '当前地址', url: 'https://b.example/vod.json' },
+      { name: '正在用的源', url: 'https://b.example/vod.json' },
     ])
     expect(resolveCfVodSources(dir, 'https://a.example/vod.json')).toEqual(dir)
   })

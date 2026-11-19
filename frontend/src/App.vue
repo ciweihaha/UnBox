@@ -30,6 +30,8 @@ import { TOP_NAV_CATEGORIES, topNavKeyForCategory, type TopNavCategory } from '.
 import { CF_VOD_SOURCE_MANUAL, DEFAULT_CF_VOD_DIRECTORY_URL, parseCfVodDirectory, resolveCfVodSources, isValidCfVodURL, vodSourceKindLabel, type CfVodDirectorySource } from './vodSource'
 import { titleBarColourForTheme } from './titleBarTheme'
 import { autoClearMessage } from './ephemeralMessage'
+import { LIVE_STALL_MS, VOD_STALL_MS } from './playbackStall'
+import { installWheelScrollFallback } from './wheelScroll'
 import DOMPurify from 'dompurify'
 
 
@@ -127,6 +129,13 @@ const livePlaybackStatus = ref<PlaybackStatus>('idle')
 const vodPlaybackStatus = ref<PlaybackStatus>('idle')
 const livePlaybackError = ref('')
 const vodPlaybackError = ref('')
+// 当前直播频道与停滞重连：冻住时（进度不动）按预算自动重拉当前台，
+// 重连中界面明确显示“正在重连…”，不再假装“正在播放”。
+const currentLiveChannel = ref<ChannelInfo | null>(null)
+const liveReconnectAttempts = ref(0)
+const liveReconnectTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+const LIVE_RECONNECT_MAX = 3
+const LIVE_RECONNECT_DELAY_MS = 2000
 // 当前点播进度（秒）：换源续播与预载判断都用它，Web 由 progress 事件更新、mpv 由 playback:event 更新。
 const vodPlaybackPosition = ref(0)
 // 起播加载中：从发起播放到画面真正出现（首个 playing 事件）之间为真。
@@ -382,19 +391,33 @@ function selectEpisodePage(page: number) {
   episodePage.value = clampEpisodePage(page, activeEpisodes.value.length)
 }
 
+// friendlySourceName 把线路原始 ID（jinyingm3u8、jinyingyun）翻成“线路1/线路2”
+// 显示：原始 ID 只留在 title 提示里。顺序按详情页 Sources 的顺序。
+function friendlySourceName(source: string): string {
+  const index = (vodDetail.value?.Sources ?? []).indexOf(source)
+  return index >= 0 ? `线路${index + 1}` : source
+}
+
 // selectEpisodeSource 切换线路。正在播放时走与自动换源一致的流程：立即播放
 // 目标线路的同名当前集并续接进度；没有同名剧集就只提示、不改动当前播放。
 async function selectEpisodeSource(source: string) {
   if (source === activeSource.value) return
   const playing = isCurrentPlayback('vod', vodPlaybackToken.value) && currentEpisodeID.value !== ''
   if (!playing) {
+    // 没在播也要防空线路：目标线路没有选集就只提示、不切换，免得详情页
+    // 选集区一下子变空（有的站只给线路名，选集在另一条线路上）。
+    const episodes = vodDetail.value?.Episodes ?? []
+    if (episodes.length > 0 && !episodes.some(ep => ep.Source === source)) {
+      errMsg.value = `「${friendlySourceName(source)}」没有选集，未切换`
+      return
+    }
     activeSource.value = source
     resetEpisodePage()
     return
   }
   const same = sameNameEpisodeOnSource(vodDetail.value?.Episodes ?? [], source, vodNowPlaying.value)
   if (!same) {
-    errMsg.value = `线路「${source}」没有同名剧集，未切换`
+    errMsg.value = `线路「${friendlySourceName(source)}」没有同名剧集，未切换`
     return
   }
   errMsg.value = ''
@@ -450,7 +473,8 @@ const homeCardItems = computed<ContentCardItem[]>(() => homeHistory.value.map(h 
     h.Site + h.VodID,
     h.VodLogo,
     h.VodTitle,
-    h.SiteName || h.Site,
+    // 首页只显示内容、不显示是什么源：源名留空，副标题只剩集数/进度。
+    '',
     h.EpName,
     fmtProgress(h.Progress),
   ),
@@ -501,9 +525,9 @@ async function goTopNavCategory(cat: TopNavCategory) {
 // 用户刚搜完回首页时 visibleVodItems 是搜索结果，行会错显示搜索结果。
 // 为你精选取前 10 条（Top 10 行已删，不再需要与它错开取 11–20 条）。
 // 列表不足 10 条时有多少显示多少。
-const homeListCardItems = computed<ContentCardItem[]>(() => vodListItems.value.map(vodCardItem))
+const homeListCardItems = computed<ContentCardItem[]>(() => vodListItems.value.map(it => vodCardItem(it, true)))
 const featuredRowItems = computed(() => homeListCardItems.value.slice(0, 10))
-const favoriteRowItems = computed(() => favoriteCardItems.value.slice(0, 10))
+const favoriteRowItems = computed(() => favoriteCardItems.value.map(f => ({ ...f, site: '' })).slice(0, 10))
 
 // 详情页的「更多类似内容」：不再只推当前列表里的几条，改成拿当前片名去
 // 全网搜同类（后台静默查所有点播站，不要 Key）；搜不到就显示空状态，
@@ -511,7 +535,7 @@ const favoriteRowItems = computed(() => favoriteCardItems.value.slice(0, 10))
 const similarNetworkItems = ref<VodItem[]>([])
 const similarLoading = ref(false)
 let similarRequest = 0
-const similarItems = computed<ContentCardItem[]>(() => similarNetworkItems.value.map(vodCardItem))
+const similarItems = computed<ContentCardItem[]>(() => similarNetworkItems.value.map(it => vodCardItem(it)))
 
 async function loadSimilarVod() {
   const request = ++similarRequest
@@ -523,7 +547,7 @@ async function loadSimilarVod() {
   }
   similarLoading.value = true
   try {
-    const items = (await ShellService.VodSimilar(detail.Title, detail.ID)) ?? []
+    const items = (await ShellService.VodSimilar(detail.Title, detail.ID, detailSite.value || activeSite.value, detail.Type || '', detail.Area || '')) ?? []
     if (request !== similarRequest) return
     similarNetworkItems.value = items as VodItem[]
   } catch {
@@ -589,8 +613,9 @@ const favoriteCardItems = computed<ContentCardItem[]>(() => vodFavorites.value.m
 
 // 点播条目（列表页与搜索结果共用）。没有站点名时把分类顶到站点位，与列表模式
 // 原先的 vodItemSub 输出保持一致；两者都缺时留空，卡片徽标不渲染。
-function vodCardItem(it: VodItem): ContentCardItem {
-  const site = it.Site ? siteName(it.Site) : ''
+// hideSite 为真时（首页）：不显示源名，分类顶到副标题位。
+function vodCardItem(it: VodItem, hideSite = false): ContentCardItem {
+  const site = hideSite ? '' : (it.Site ? siteName(it.Site) : '')
   return {
     key: it.ID + (it.Site || ''),
     logo: it.Logo,
@@ -600,7 +625,7 @@ function vodCardItem(it: VodItem): ContentCardItem {
   }
 }
 
-const vodCardItems = computed<ContentCardItem[]>(() => visibleVodItems.value.map(vodCardItem))
+const vodCardItems = computed<ContentCardItem[]>(() => visibleVodItems.value.map(it => vodCardItem(it)))
 
 // 搜索结果中开头连续「强相关」的条数 = 强弱分界线的落点。排序在每次写入
 // vodSearchItems 时完成（强相关在前），这里只数前缀。
@@ -1186,9 +1211,15 @@ async function loadLive() {
   } catch (e) { handleError(e) }
 }
 
-async function play(c: ChannelInfo) {
+async function play(c: ChannelInfo, quiet = false) {
   errMsg.value = ''
   currentVod.value = null
+  currentLiveChannel.value = c
+  liveReconnectAttempts.value = 0
+  if (liveReconnectTimer.value !== null) {
+    clearTimeout(liveReconnectTimer.value)
+    liveReconnectTimer.value = null
+  }
   const token = beginPlayback('live')
   livePlaybackPlan.value = null
   livePlaybackToken.value = 0
@@ -1199,7 +1230,8 @@ async function play(c: ChannelInfo) {
   liveSubtitleText.value = ''
   // 切频道反馈走瞬态 toast（不再常驻播放器上方）；收藏视图下不改分类下拉框，
   // 免得下拉框显示的分组和列表里实际的收藏内容对不上。
-  flashLiveToast(`正在切换频道：${c.Name}`)
+  // 自动重连时不重复报“正在切换频道”，重连那句 toast 已经够了。
+  if (!quiet) flashLiveToast(`正在切换频道：${c.Name}`)
   if (!liveFavOnly.value && c.Group && groups.value.includes(c.Group)) activeGroup.value = c.Group
   try {
     const plan = await ShellService.PrepareChannelWithToken(c.ID, token) as unknown as PlaybackPlan
@@ -1215,6 +1247,39 @@ async function play(c: ChannelInfo) {
       setLivePlaybackError(String(e))
     }
   }
+}
+
+// onLiveStalled 处理直播冻住：进度不动已由 PlaybackView 的停滞检测报上来。
+// 预算内自动重拉当前台（2 秒间隔，最多 3 次），重连中显示“正在重连…”；
+// 预算用完仍不通就停在报错上，让用户换台。用户已手动切台时不再动作。
+function onLiveStalled() {
+  const c = currentLiveChannel.value
+  if (!c || livePlaybackStatus.value !== 'playing') return
+  if (liveReconnectAttempts.value >= LIVE_RECONNECT_MAX) {
+    livePlaybackStatus.value = 'error'
+    setLivePlaybackError('频道信号中断，请换台试试')
+    return
+  }
+  liveReconnectAttempts.value++
+  livePlaybackStatus.value = 'reconnecting'
+  flashLiveToast(`信号中断，正在重连（第 ${liveReconnectAttempts.value} 次）…`)
+  if (liveReconnectTimer.value !== null) clearTimeout(liveReconnectTimer.value)
+  liveReconnectTimer.value = setTimeout(() => {
+    liveReconnectTimer.value = null
+    if (livePlaybackStatus.value === 'reconnecting') void play(c, true)
+  }, LIVE_RECONNECT_DELAY_MS)
+}
+
+// onVodStalled 处理点播冻住：自动换源开着就走已有换线逻辑，关着只报一次
+// 瞬态提示（5 秒自动消失），不改动当前播放。
+function onVodStalled(token: number) {
+  if (!isCurrentPlayback('vod', token)) return
+  if (playbackSettings.value.AutoSwitchSource) {
+    setVodPlaybackError('播放停滞，正在换线路…')
+  } else {
+    errMsg.value = '播放停滞，请手动换线路或重新播放'
+  }
+  vodAutomation.signal(token, 'error')
 }
 
 async function toggleFav(c: ChannelInfo) {
@@ -1539,6 +1604,13 @@ async function openVodDetail(item: VodItem) {
     mode.value = 'vod'
     vodView.value = 'detail'
     activeSource.value = d.Sources?.[0] ?? ''
+    // 首选线路没有选集时自动换到有选集的线路（有的站只给线路名、
+    // 选集在另一条线路上，直接留在空线路上会让详情页看不到选集按钮）。
+    const detailEpisodes = d.Episodes ?? []
+    if (detailEpisodes.length > 0 && !detailEpisodes.some(ep => ep.Source === activeSource.value)) {
+      const withEpisodes = d.Sources?.find(src => detailEpisodes.some(ep => ep.Source === src))
+      if (withEpisodes) activeSource.value = withEpisodes
+    }
     resetEpisodePage()
     vodFavorited.value = await ShellService.IsVodFavorite(site, d.ID)
     // 详情落地后后台全网找同类，不挡详情显示。
@@ -2029,8 +2101,19 @@ async function applyTheme(name: string) {
 
 // 标题栏跟背景色：窗口顶部那条原生标题栏改成当前主题的背景色，别白一条。
 // 失败不打扰（纯点缀；Windows 10 老系统不支持改标题栏颜色）。
+// 返回值记下来：Server 2022 上标题栏着色失败时，设置页给一句提示。
+const titleBarStatus = ref<{ dark: boolean; caption: boolean; border: boolean } | null>(null)
 async function syncTitleBarColour() {
-  try { await ShellService.SetTitleBarColour(titleBarColourForTheme(currentTheme.value)) } catch { /* 忽略 */ }
+  try {
+    const result = await ShellService.SetTitleBarColour(titleBarColourForTheme(currentTheme.value)) as unknown as { DarkModeApplied?: boolean; CaptionApplied?: boolean; BorderApplied?: boolean } | null
+    if (result) {
+      titleBarStatus.value = {
+        dark: !!result.DarkModeApplied,
+        caption: !!result.CaptionApplied,
+        border: !!result.BorderApplied,
+      }
+    }
+  } catch { /* 忽略 */ }
 }
 
 async function applyContentCardStyle(style = contentCardStyle.value) {
@@ -2073,6 +2156,14 @@ function openTheme() {
   showTheme.value = true
 }
 
+const appRoot = ref<HTMLElement | null>(null)
+let uninstallWheelFallback: (() => void) | null = null
+
+// handleAboutKeydown：关于弹窗打开时 Esc 关闭（遮罩点击已支持）。
+function handleAboutKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && showAbout.value) showAbout.value = false
+}
+
 onMounted(() => {
   refresh()
   loadTheme()
@@ -2084,6 +2175,11 @@ onMounted(() => {
   document.addEventListener('click', closeCardContextMenu)
   document.addEventListener('keydown', handleCardContextMenuKeydown)
   document.addEventListener('keydown', handleGlobalSpaceKey)
+  document.addEventListener('keydown', handleAboutKeydown)
+  // 滚轮兜底：WebView2 里滚轮偶尔不滚动时手动补滚（原生滚动正常时不触发）。
+  if (appRoot.value) uninstallWheelFallback = installWheelScrollFallback(appRoot.value)
+  // 标题栏着色在窗口刚建好时可能失败（DWM 还没准备好），1.5 秒后再试一次。
+  setTimeout(() => { void syncTitleBarColour() }, 1500)
   window.addEventListener('resize', syncSearchHistoryDropdownOnResize)
   Events.On('import:progress', (ev: any) => { importProgress.value = ev.data as Progress })
   Events.On('search:start', (ev: any) => {
@@ -2123,6 +2219,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('click', closeCardContextMenu)
   document.removeEventListener('keydown', handleCardContextMenuKeydown)
+  document.removeEventListener('keydown', handleAboutKeydown)
+  uninstallWheelFallback?.()
+  uninstallWheelFallback = null
+  if (liveReconnectTimer.value !== null) clearTimeout(liveReconnectTimer.value)
   document.removeEventListener('keydown', handleGlobalSpaceKey)
   window.removeEventListener('resize', syncSearchHistoryDropdownOnResize)
   vodAutomation.stop()
@@ -2133,7 +2233,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="container">
+  <main class="container" ref="appRoot">
     <header class="topnav" :class="{ solid: mode !== 'home' || navScrolled }">
       <div class="logo" :title="platform + ' · 播放器' + (playerReady ? '就绪' : '未就绪')" @click="switchMode('home')">
         <img class="brand-logo" src="/appicon.png" alt="UnBox" />
@@ -2330,9 +2430,9 @@ onBeforeUnmount(() => {
       </section>
 
       <aside class="player">
-        <p v-if="liveNowPlaying" class="now">正在播放：{{ liveNowPlaying }}</p>
+        <p v-if="liveNowPlaying" class="now">{{ livePlaybackStatus === 'reconnecting' ? '正在重连' : '正在播放' }}：{{ liveNowPlaying }}<span v-if="livePlaybackStatus === 'reconnecting'">（第 {{ liveReconnectAttempts }} 次）</span></p>
         <p v-if="livePlaybackStatus === 'error'" class="playback-error" aria-live="assertive">频道播放失败：{{ livePlaybackError }}</p>
-        <PlaybackView ref="livePlayerRef" :plan="livePagePlaybackPlan" :mpv-paused="mpvPaused" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" :live-subtitle="liveSubtitleText" :live-subtitle-enabled="liveSubtitleSettings.Enabled" :live-audio-pusher="liveAudioPusher" @fallback="(id, position) => fallbackToMpv('live', id, livePlaybackToken, position)" @toggle-pause="toggleMpvPause" />
+        <PlaybackView ref="livePlayerRef" :plan="livePagePlaybackPlan" :stall-threshold-ms="LIVE_STALL_MS" :mpv-paused="mpvPaused" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" :live-subtitle="liveSubtitleText" :live-subtitle-enabled="liveSubtitleSettings.Enabled" :live-audio-pusher="liveAudioPusher" @fallback="(id, position) => fallbackToMpv('live', id, livePlaybackToken, position)" @stalled="onLiveStalled" @toggle-pause="toggleMpvPause" />
       </aside>
 
       <div v-if="liveToast" class="app-toast" role="status" aria-live="polite">{{ liveToast }}</div>
@@ -2487,6 +2587,7 @@ onBeforeUnmount(() => {
           <button type="button" class="settings-choice" @click="openContentCardStyle">内容展示样式：{{ contentCardStyleLabel(contentCardStyle) }}</button>
           <button type="button" class="settings-choice" @click="openTheme">主题：{{ themeOptions.find(t => t.id === currentTheme)?.label || '默认' }}</button>
         </div>
+        <p v-if="titleBarStatus && !titleBarStatus.caption" class="settings-hint">这台电脑的系统不支持改标题栏颜色，顶部标题栏会保持系统默认颜色。</p>
       </section>
 
       <section class="src-section">
@@ -2567,7 +2668,7 @@ onBeforeUnmount(() => {
           <div class="vod-detail-player">
             <p v-if="vodNowPlaying" class="vod-now-playing">正在播放：{{ vodNowPlaying }}</p>
             <p v-if="vodPlaybackStatus === 'error'" class="playback-error" aria-live="assertive">剧集播放失败：{{ vodPlaybackError }}</p>
-            <PlaybackView ref="vodPlayerRef" :plan="vodPagePlaybackPlan" :seek-to="pendingSeek" :loading="vodPlayerLoading" :skip-marks="vodSkipMarks" :mpv-paused="mpvPaused" @mark-intro="(p) => markSkipAt('intro', p)" @mark-outro="(p) => markSkipAt('outro', p)" @reset-intro="resetSkipMark('intro')" @reset-outro="resetSkipMark('outro')" :suppress-fallback="playbackSettings.AutoSwitchSource" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" @fallback="(id, position) => fallbackToMpv('vod', id, vodPlaybackToken, position)" @playback="(state, message) => onVodPlaybackSignal(vodPlaybackToken, state, message)" @progress="(time, duration) => onVodProgress(vodPlaybackToken, time, duration)" @toggle-pause="toggleMpvPause" />
+            <PlaybackView ref="vodPlayerRef" :plan="vodPagePlaybackPlan" :seek-to="pendingSeek" :loading="vodPlayerLoading" :skip-marks="vodSkipMarks" :mpv-paused="mpvPaused" :stall-threshold-ms="VOD_STALL_MS" @mark-intro="(p) => markSkipAt('intro', p)" @mark-outro="(p) => markSkipAt('outro', p)" @reset-intro="resetSkipMark('intro')" @reset-outro="resetSkipMark('outro')" :suppress-fallback="playbackSettings.AutoSwitchSource" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" @fallback="(id, position) => fallbackToMpv('vod', id, vodPlaybackToken, position)" @playback="(state, message) => onVodPlaybackSignal(vodPlaybackToken, state, message)" @progress="(time, duration) => onVodProgress(vodPlaybackToken, time, duration)" @stalled="() => onVodStalled(vodPlaybackToken)" @toggle-pause="toggleMpvPause" />
             <PreloadView :plan="preloadPlan" />
             <div v-if="vodSkipNotice" class="skip-notice">{{ vodSkipNotice }}</div>
           </div>
@@ -2592,8 +2693,9 @@ onBeforeUnmount(() => {
         </div>
         <section class="vod-detail-episodes">
           <div v-if="(vodDetail.Sources ?? []).length" class="ep-src-tabs">
-            <button v-for="src in vodDetail.Sources" :key="src" :class="{ active: src === activeSource }" @click="selectEpisodeSource(src)">{{ src }}</button>
+            <button v-for="src in vodDetail.Sources" :key="src" :class="{ active: src === activeSource }" :title="src" @click="selectEpisodeSource(src)">{{ friendlySourceName(src) }}</button>
           </div>
+          <p v-if="(vodDetail.Sources ?? []).length && !activeEpisodes.length" class="home-empty" role="status">当前线路暂无选集，换条线路试试</p>
           <div v-if="episodeRanges.length > 1" class="ep-pagination-wrap" role="navigation" aria-label="剧集分页">
             <button class="ep-pagination-arrow" type="button" aria-label="向左滚动剧集分页" title="向左滚动" @click="scrollEpisodePages(-1)">‹</button>
             <div ref="episodePagination" class="ep-pagination">

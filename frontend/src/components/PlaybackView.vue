@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Hls, { type ErrorData, type Events } from 'hls.js'
 import mpegts from 'mpegts.js'
 import { useHlsTracks, type TrackState } from '../useHlsTracks'
+import { LIVE_STALL_MS, PlaybackStallDetector } from '../playbackStall'
 import { activeCueText } from '../subtitleTranslate'
 import { LiveAudioCapture, type LiveAudioPusher } from '../liveAudio'
 import type { VodSkipMarks } from '../vodSkip'
@@ -41,11 +42,15 @@ const props = defineProps<{
   liveAudioPusher?: LiveAudioPusher
   /** mpv 后端是否暂停：mpv 没有 <video> 元素，暂停状态由 App 经 ShellService 维护。 */
   mpvPaused?: boolean
+  /** 进度停滞多久判死（毫秒）：直播默认 10 秒，点播默认 15 秒。 */
+  stallThresholdMs?: number
 }>()
 const emit = defineEmits<{
   fallback: [id: string, position: number]
   progress: [time: number, duration: number]
   playback: [state: PlaybackState, message?: string]
+  /** 进度停滞：播着播着不动了（直播冻住、点播断流），上层据此重连/换线。 */
+  stalled: []
   markIntro: [position: number]
   markOutro: [position: number]
   resetIntro: []
@@ -107,6 +112,17 @@ let errorReported = false
 let networkRestarts = 0
 let mediaRecoveries = 0
 let attachGeneration = 0
+// 停滞检测：进度不动就判死（直播冻住不报错、不缓冲时唯一能发现的信号）。
+// 只在 web 播放器起播后盯；mpv 没有 <video> 元素，停滞由后端另行处理。
+let stallDetector: PlaybackStallDetector | null = null
+function ensureStallDetector(): PlaybackStallDetector {
+  if (!stallDetector) {
+    stallDetector = new PlaybackStallDetector(props.stallThresholdMs ?? LIVE_STALL_MS, () => {
+      emit('stalled')
+    })
+  }
+  return stallDetector
+}
 // autoplayPending：本次挂载的流就绪后是否要自动开始播放。
 let autoplayPending = false
 
@@ -229,6 +245,7 @@ function destroyLiveCapture(): void {
 
 function cleanup() {
   attachGeneration++
+  stallDetector?.stop()
   trackState.value?.detach(); trackState.value = null
   menuOpen.value = false
   autoplayPending = false
@@ -357,6 +374,7 @@ function onPlay(): void {
   playing.value = true
   hasStarted.value = true
   seeking.value = false
+  ensureStallDetector().start()
   emit('playback', 'playing')
   scheduleHideControls()
   void maybeStartLiveCapture()
@@ -366,6 +384,13 @@ function onPause(): void {
   playing.value = false
   controlsVisible.value = true
   clearHideTimer()
+  stallDetector?.setPlaying(false)
+}
+
+// onSeeked：跳转完成，重计时（跳转本身不是冻住）。
+function onSeeked(): void {
+  seeking.value = false
+  stallDetector?.setPlaying(true)
 }
 
 function onVolumeChange(): void {
@@ -619,6 +644,8 @@ function onTimeUpdate() {
   if (!element) return
   currentTime.value = element.currentTime
   duration.value = Number.isFinite(element.duration) ? element.duration : 0
+  // 跳转中的进度跳变不算前进：seek 完再重计时，免得一次跳转掩盖冻住。
+  if (!seeking.value) stallDetector?.progress(element.currentTime)
   emit('progress', element.currentTime, element.duration || 0)
 }
 
@@ -749,7 +776,7 @@ onBeforeUnmount(() => {
       @volumechange="onVolumeChange"
       @ratechange="onRateUpdate"
       @seeking="seeking = true"
-      @seeked="seeking = false"
+      @seeked="onSeeked"
       @enterpictureinpicture="onEnterPictureInPicture"
       @leavepictureinpicture="onLeavePictureInPicture"
       @dblclick="onVideoDblClick"

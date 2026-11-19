@@ -73,7 +73,9 @@ describe('vod detail redesign', () => {
 
   it('sizes episode buttons so that 第01集 shows in full instead of truncating', () => {
     expect(stylesheet).toMatch(/\.vod-detail-episodes \.ep-list\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(72px, 1fr\)\);/s)
-    expect(stylesheet).toMatch(/\.ep-list button\s*\{[^}]*font-size:\s*0\.8rem;/s)
+    // 选集按钮做大（0.95rem）：小而素看不清，正在播的集除高亮外再加 ▶ 标记。
+    expect(stylesheet).toMatch(/\.ep-list button\s*\{[^}]*font-size:\s*0\.95rem;/s)
+    expect(stylesheet).toMatch(/\.ep-list button\.active::before\s*\{[^}]*content:\s*'▶ '/s)
   })
 
   it('keeps the season pills and the similar-content poster grid', () => {

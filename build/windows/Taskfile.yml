@@ -110,6 +110,16 @@ tasks:
           sed -i "s/\"file_version\": \".*\"/\"file_version\": \"$v\"/" "$dir/info.json"
           sed -i "s/\"ProductVersion\": \".*\"/\"ProductVersion\": \"$v\"/" "$dir/info.json"
           echo "版本信息已同步为 $v"
+          # 正式发版（tag 构建）时版本文件必须已随发版提交预先改好：上面三行 sed
+          # 只是内容不变的复写，树保持干净，go build 才不会给版本带 +dirty。
+          # 若 sed 改动了版本文件，说明这次 tag 的版本号没提前提交——直接失败，
+          # 别悄悄发一个内部版本带 +dirty 的包。手动构建（VERSION=0.0.1）跳过。
+          if [ "$v" != "0.0.1" ] && command -v git >/dev/null 2>&1; then
+            if ! git diff --quiet -- "$dir/nsis/project.nsi" "$dir/info.json"; then
+              echo "版本文件被构建改动：请先把 $v 写进 project.nsi 与 info.json 并提交，再打 tag"
+              exit 1
+            fi
+          fi
       - task: '{{if eq (.FORMAT | default "nsis") "msix"}}create:msix:package{{else}}create:nsis:installer{{end}}'
         vars:
           INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'

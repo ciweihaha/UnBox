@@ -148,7 +148,8 @@ describe('player red progress contract', () => {
 describe('home rows contract', () => {
   it('sources home rows from the vod list, never from search results', () => {
     // 搜完回首页时 visibleVodItems 是搜索结果；行必须只取 vodListItems。
-    expect(app).toMatch(/homeListCardItems\s*=\s*computed[^\n]*vodListItems\.value\.map\(vodCardItem\)/)
+    // 首页不显示源名：vodCardItem 第二个参数 true 藏掉源名。
+    expect(app).toMatch(/homeListCardItems\s*=\s*computed[^\n]*vodListItems\.value\.map\(it => vodCardItem\(it, true\)\)/)
     expect(app).not.toMatch(/featuredRowItems\s*=\s*computed\([^\n]*visibleVodItems/)
   })
 

@@ -52,10 +52,22 @@ func TestTitleBarIsDark(t *testing.T) {
 func TestSetTitleBarColourNoAppIsNoop(t *testing.T) {
 	// 测试里没有 Wails 应用实例：不应崩也不应报错，直接空操作。
 	svc := NewShellService(nil, nil, nil)
-	if err := svc.SetTitleBarColour("#141414"); err != nil {
+	if _, err := svc.SetTitleBarColour("#141414"); err != nil {
 		t.Errorf("没有应用实例时应空操作，得到错误: %v", err)
 	}
-	if err := svc.SetTitleBarColour("不是颜色"); err == nil {
+	if _, err := svc.SetTitleBarColour("不是颜色"); err == nil {
 		t.Error("非法颜色应返回错误")
+	}
+}
+
+func TestSetTitleBarColourResultShape(t *testing.T) {
+	// 没有应用实例时返回零值结果、不报错；结果结构供前端判断用。
+	svc := NewShellService(nil, nil, nil)
+	res, err := svc.SetTitleBarColour("#141414")
+	if err != nil {
+		t.Fatalf("SetTitleBarColour: %v", err)
+	}
+	if res.DarkModeApplied || res.CaptionApplied || res.BorderApplied {
+		t.Errorf("没有应用实例时不应谎报已生效：%+v", res)
 	}
 }

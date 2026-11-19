@@ -34,7 +34,8 @@ describe('vod featured row redesign', () => {
 
   it('feeds the featured row from the logo-carrying card items', () => {
     expect(app).toMatch(/featuredRowItems\s*=\s*computed\(\(\) => homeListCardItems\.value\.slice\(0,\s*10\)\)/)
-    expect(app).toMatch(/homeListCardItems\s*=\s*computed<ContentCardItem\[\]>\(\(\) => vodListItems\.value\.map\(vodCardItem\)\)/)
+    // 首页不显示源名：vodCardItem 第二个参数 true 藏掉源名。
+    expect(app).toMatch(/homeListCardItems\s*=\s*computed<ContentCardItem\[\]>\(\(\) => vodListItems\.value\.map\(it => vodCardItem\(it, true\)\)\)/)
     expect(cardList).toContain('content-card-fallback')
   })
 })

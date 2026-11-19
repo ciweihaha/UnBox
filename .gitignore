@@ -17,6 +17,8 @@ frontend/bindings/
 build/linux/appimage/build/
 build/linux/*.desktop
 build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
+# wails3 generate syso 写在仓库根的 .syso（不入库，否则 go build 认树脏、版本带 +dirty）
+*.syso
 build/mpv/
 lib/
 

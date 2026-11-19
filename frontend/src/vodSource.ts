@@ -31,11 +31,11 @@ export const DEFAULT_CF_VOD_DIRECTORY_URL = 'https://live.ciweihaha.win/vod-sour
 
 /**
  * 目录拉不到时（没网、地址不对、文件还没挂上）的内置源：
- * 就是目录文件里会列的那几个，先顶着用。
+ * 就是目录文件里会列的那几个，先顶着用（名字与目录文件一致）。
  */
 export const DEFAULT_CF_VOD_SOURCES: CfVodDirectorySource[] = [
-  { name: '聚合万能源', url: 'https://live.ciweihaha.win/vod.json' },
-  { name: '聚合·37站', url: 'https://ysp.ciweihaha.win/agg' },
+  { name: '聚合万能源（44站合一·支持4K）', url: 'https://live.ciweihaha.win/vod.json' },
+  { name: 'OrionTV 聚合（38站）', url: 'https://ysp.ciweihaha.win/agg' },
   { name: '亚洲点播', url: 'https://ysp.ciweihaha.win/oktv-asia.json' },
 ]
 
@@ -69,7 +69,7 @@ export function parseCfVodDirectory(value: unknown): CfVodDirectorySource[] {
 
 /**
  * resolveCfVodSources 合并目录源与当前正在用的地址：目录里的优先；
- * 当前地址不在目录里时追加一项“当前地址”，免得下拉框选不中正在用的源；
+ * 当前地址不在目录里时追加一项“正在用的源”，免得下拉框选不中正在用的源；
  * 目录和当前地址都没有时用内置默认源。
  */
 export function resolveCfVodSources(
@@ -79,7 +79,7 @@ export function resolveCfVodSources(
   const merged = [...dir]
   const url = currentUrl.trim()
   if (url && isValidCfVodURL(url) && !merged.some((s) => s.url === url)) {
-    merged.push({ name: '当前地址', url })
+    merged.push({ name: '正在用的源', url })
   }
   return merged.length ? merged : [...DEFAULT_CF_VOD_SOURCES]
 }

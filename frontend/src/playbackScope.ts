@@ -1,6 +1,6 @@
 export type PlaybackMode = 'home' | 'vod' | 'live' | 'search' | 'favorites' | 'settings'
 export type PlaybackScope = 'live' | 'vod'
-export type PlaybackStatus = 'idle' | 'preparing' | 'playing' | 'error'
+export type PlaybackStatus = 'idle' | 'preparing' | 'playing' | 'reconnecting' | 'error'
 
 export function shouldShowMpvInstallPrompt(platform: string, mpvReady: boolean, mpvNeeded: boolean): boolean {
   if (mpvReady) return false

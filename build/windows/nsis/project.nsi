@@ -22,7 +22,7 @@ Unicode true
 !define INFO_PROJECTNAME    "unbox"
 !define INFO_COMPANYNAME    "RejectCode"
 !define INFO_PRODUCTNAME    "UnBox"
-!define INFO_PRODUCTVERSION "0.1.0"
+!define INFO_PRODUCTVERSION "0.9.17"
 !define INFO_COPYRIGHT      "© 2026 UnBox Contributors"
 ###
 ## !define PRODUCT_EXECUTABLE  "Application.exe"      # Default "${INFO_PROJECTNAME}.exe"
