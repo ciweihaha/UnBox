@@ -22,12 +22,13 @@ import { initializeHomeState } from './startup'
 import { isMpvUnavailableError, mpvInstallHint, playbackPlanForMode, resolvePlaybackFallback, shouldPauseStalePlayback, shouldRecordVodProgress, shouldShowMpvInstallPrompt, type ActivePlaybackSession, type PlaybackScope, type PlaybackStatus } from './playbackScope'
 import { createVodSearchCache, isCurrentVodCategoryRequest, isVodSearchCacheValid, nextVodCategoryRequest, nextVodSearchRequest, pickResumeSeek, removeVodFavorite, removeVodHistory, removeVodSearchHistory, resolveVodSelection, resumeSeekFor, shouldShowVodNoResults, upsertVodSearchHistory, vodBackTarget, vodResumeView, vodSearchQueryForReturn, type VodDetailOrigin, type VodSearchCache, type VodView } from './vodNavigation'
 import { buildVodSourceDeadInfo, vodSourceDeadBackLabel, vodSourceDeadBackTarget, type VodSourceDeadInfo } from './vodSourceDead'
-import { appendVodItems, hasNextVodPage, nextVodPage } from './vodPagination'
+import { appendVodItems, hasNextVodPage, nextVodPage, VOD_LIST_PREFETCH_PAGES } from './vodPagination'
 import { countLeadingStrong, sortVodSearchResults } from './vodSearchRelevance'
 import { appliedFilter, availableFilterGroups, hasActiveFilter, initialSelections } from './vodFilters'
 import { certErrorHost } from './tlsExempt'
 import { TOP_NAV_CATEGORIES, topNavKeyForCategory, type TopNavCategory } from './topNav'
 import { CF_VOD_SOURCE_MANUAL, DEFAULT_CF_VOD_DIRECTORY_URL, parseCfVodDirectory, resolveCfVodSources, isValidCfVodURL, vodSourceKindLabel, type CfVodDirectorySource } from './vodSource'
+import { titleBarColourForTheme } from './titleBarTheme'
 import { autoClearMessage } from './ephemeralMessage'
 import DOMPurify from 'dompurify'
 
@@ -42,6 +43,14 @@ const groups = ref<string[]>([])
 const channels = ref<ChannelInfo[]>([])
 const favorites = ref<ChannelInfo[]>([])
 const activeGroup = ref('*')
+// 收藏视图开关：开着时频道列表只显示已收藏频道；分类下拉框仍显示当前分组，
+// 不再像以前那样把 activeGroup 改成 '__fav__'（下拉框里没有这一项，会显示错）。
+const liveFavOnly = ref(false)
+// 直播分类下拉框选项：全部 + 各分组。
+const liveGroupOptions = computed(() => [
+  { name: '全部', value: '*' },
+  ...groups.value.filter((g) => g !== '*').map((g) => ({ name: g, value: g })),
+])
 const query = ref('')
 const liveNowPlaying = ref('')
 // 直播切频道的瞬态 toast：取代播放器上方「正在切换频道…」常驻文案。
@@ -422,7 +431,6 @@ function sitesOfLine(line: string) {
   return vodSites.value.filter(s => (s.Line || '') === line)
 }
 const vodLineOptions = computed(() => vodLines.value.map(line => ({ name: line || '默认线路', value: line })))
-const vodSiteOptions = computed(() => sitesOfLine(activeLine.value).map(s => ({ name: s.Name, value: s.ID })))
 function siteName(site: string) {
   if (!site) return ''
   return sources.value.find(s => s.ID === site)?.Name ?? site
@@ -497,14 +505,34 @@ const homeListCardItems = computed<ContentCardItem[]>(() => vodListItems.value.m
 const featuredRowItems = computed(() => homeListCardItems.value.slice(0, 10))
 const favoriteRowItems = computed(() => favoriteCardItems.value.slice(0, 10))
 
-// 详情弹窗里的「更多类似内容」：与当前详情同一份真实列表（搜索进来用搜索
-// 结果，否则用点播列表），去掉正在看的这一部，取前 8 个。
-const similarSourceItems = computed<VodItem[]>(() => {
-  if (!vodDetail.value) return []
-  const source = vodDetailOrigin.value === 'search' ? vodSearchItems.value : vodListItems.value
-  return source.filter(it => it.ID !== vodDetail.value?.ID).slice(0, 8)
-})
-const similarItems = computed<ContentCardItem[]>(() => similarSourceItems.value.map(vodCardItem))
+// 详情页的「更多类似内容」：不再只推当前列表里的几条，改成拿当前片名去
+// 全网搜同类（后台静默查所有点播站，不要 Key）；搜不到就显示空状态，
+// 不硬推不相关的。打开详情后触发，返回/换详情时作废上一轮。
+const similarNetworkItems = ref<VodItem[]>([])
+const similarLoading = ref(false)
+let similarRequest = 0
+const similarItems = computed<ContentCardItem[]>(() => similarNetworkItems.value.map(vodCardItem))
+
+async function loadSimilarVod() {
+  const request = ++similarRequest
+  const detail = vodDetail.value
+  if (!detail) {
+    similarNetworkItems.value = []
+    similarLoading.value = false
+    return
+  }
+  similarLoading.value = true
+  try {
+    const items = (await ShellService.VodSimilar(detail.Title, detail.ID)) ?? []
+    if (request !== similarRequest) return
+    similarNetworkItems.value = items as VodItem[]
+  } catch {
+    if (request !== similarRequest) return
+    similarNetworkItems.value = []
+  } finally {
+    if (request === similarRequest) similarLoading.value = false
+  }
+}
 
 // 首页分类快捷入口：进点播后选中该分类（复用点播页自己的选分类逻辑）。
 async function goVodCategory(id: string) {
@@ -1121,7 +1149,27 @@ async function reloadGroups() {
 }
 
 async function reloadChannels() {
+  // 收藏视图下列表就是已收藏频道，不按分类去后端拉。
+  if (liveFavOnly.value) {
+    channels.value = [...favorites.value]
+    return
+  }
   channels.value = (await ShellService.Channels(activeGroup.value === '*' ? '' : activeGroup.value, 0)) ?? []
+}
+
+function selectLiveGroup(id: string) {
+  liveFavOnly.value = false
+  activeGroup.value = id
+  void reloadChannels()
+}
+
+async function toggleLiveFavorites() {
+  if (liveFavOnly.value) {
+    liveFavOnly.value = false
+    await reloadChannels()
+    return
+  }
+  await loadFavorites()
 }
 
 async function doSearch() {
@@ -1149,10 +1197,10 @@ async function play(c: ChannelInfo) {
   liveNowPlaying.value = c.Name
   // 切台清掉上一条直播字幕，免得新台还顶着旧台的句子。
   liveSubtitleText.value = ''
-  // 切频道反馈走瞬态 toast（不再常驻播放器上方）；并高亮左侧该频道所属分类，
-  // 抵消频道列表去掉分类名后丢失的归属信息。列表内容保持不变，只移动高亮。
+  // 切频道反馈走瞬态 toast（不再常驻播放器上方）；收藏视图下不改分类下拉框，
+  // 免得下拉框显示的分组和列表里实际的收藏内容对不上。
   flashLiveToast(`正在切换频道：${c.Name}`)
-  if (c.Group && groups.value.includes(c.Group)) activeGroup.value = c.Group
+  if (!liveFavOnly.value && c.Group && groups.value.includes(c.Group)) activeGroup.value = c.Group
   try {
     const plan = await ShellService.PrepareChannelWithToken(c.ID, token) as unknown as PlaybackPlan
     if (!isCurrentPlayback('live', token)) { await pauseStalePlayback(token); return }
@@ -1180,9 +1228,9 @@ async function toggleFav(c: ChannelInfo) {
 
 async function loadFavorites() {
   favorites.value = (await ShellService.ListFavorites()) ?? []
-  // 收藏作为「分类」：点按后右侧频道列表切换为已收藏频道，并高亮「收藏」。
+  // 收藏作为筛选态：右侧频道列表切换为已收藏频道，☆ 开关高亮；分类下拉框不动。
   channels.value = [...favorites.value]
-  activeGroup.value = '__fav__'
+  liveFavOnly.value = true
 }
 
 async function loadSources() {
@@ -1209,16 +1257,6 @@ async function selectLine(line: string) {
     await reloadVodCategories()
     await ShellService.SetLastVodSite(first.ID)
   }
-}
-
-async function selectSite(id: string) {
-  activeSite.value = id
-  vodDetail.value = null
-  vodView.value = 'list'
-  vodPage.value = 0
-  resetVodFilter()
-  await reloadVodCategories()
-  await ShellService.SetLastVodSite(id)
 }
 
 async function reloadVodCategories() {
@@ -1284,6 +1322,7 @@ async function reloadVodList(reset = true) {
   const request = ++vodListRequest
   const page = nextVodPage(vodPage.value)
   vodListLoading.value = true
+  let loadedOk = false
   try {
     const result = await ShellService.VodListFiltered(activeSite.value, vodActiveCat.value, page, vodFilterActive.value) as VodListPage
     if (request !== vodListRequest) return
@@ -1294,6 +1333,7 @@ async function reloadVodList(reset = true) {
     vodPage.value = result?.Page > 0 ? result.Page : page
     vodHasMore.value = hasNextVodPage(result, addedCount)
     vodListEnd.value = !vodHasMore.value
+    loadedOk = true
     // 追加/换页后旧位置不再算最底：先立即置 false 避免分割线闪一下，
     // DOM 更新后按实际滚动位置重新量取。
     vodListAtBottom.value = false
@@ -1307,7 +1347,20 @@ async function reloadVodList(reset = true) {
       handleError(e)
     }
   } finally {
-    if (request === vodListRequest) vodListLoading.value = false
+    if (request === vodListRequest) {
+      vodListLoading.value = false
+      if (reset && loadedOk && vodHasMore.value) void prefetchVodPages()
+    }
+  }
+}
+
+// 换分类后默认多拉两页（共 3 页约 60 条）：每分类只给一页太少，用户要「多放
+// 一些」。后台静默追加，不挡首屏；切分类/筛选/没更多页时立刻停。
+async function prefetchVodPages() {
+  const cat = vodActiveCat.value
+  for (let i = 0; i < VOD_LIST_PREFETCH_PAGES; i++) {
+    if (vodActiveCat.value !== cat || !vodHasMore.value || vodListLoading.value) return
+    await reloadVodList(false)
   }
 }
 
@@ -1472,7 +1525,11 @@ async function openVodDetail(item: VodItem) {
   vodSourceDead.value = null
   vodDetailLoading.value = item.Title
   // 清掉上一条留下的详情，失败后 openVodFavorite 的 `!vodDetail.value` 守卫才靠得住。
+  // 同类也一起清掉，上一轮后台查询作废。
   vodDetail.value = null
+  similarRequest++
+  similarNetworkItems.value = []
+  similarLoading.value = false
   try {
     if (searching.value) await cancelSearch()
     detailSite.value = site
@@ -1484,6 +1541,8 @@ async function openVodDetail(item: VodItem) {
     activeSource.value = d.Sources?.[0] ?? ''
     resetEpisodePage()
     vodFavorited.value = await ShellService.IsVodFavorite(site, d.ID)
+    // 详情落地后后台全网找同类，不挡详情显示。
+    void loadSimilarVod()
   } catch (e) {
     if (certErrorHost(String(e))) tlsRetry = () => openVodDetail(item)
     openVodSourceDead(site, item.Title, origin, e)
@@ -1538,6 +1597,9 @@ async function backFromVodDetail() {
   currentVod.value = null
   vodDetail.value = null
   vodResume.value = null
+  similarRequest++
+  similarNetworkItems.value = []
+  similarLoading.value = false
   if (target === 'home') {
     mode.value = 'home'
     await refreshHome()
@@ -1961,7 +2023,14 @@ async function applyTheme(name: string) {
   currentTheme.value = name
   document.body.dataset.theme = name
   try { await ShellService.SetTheme(name) } catch (e) { handleError(e) }
+  void syncTitleBarColour()
   showTheme.value = false
+}
+
+// 标题栏跟背景色：窗口顶部那条原生标题栏改成当前主题的背景色，别白一条。
+// 失败不打扰（纯点缀；Windows 10 老系统不支持改标题栏颜色）。
+async function syncTitleBarColour() {
+  try { await ShellService.SetTitleBarColour(titleBarColourForTheme(currentTheme.value)) } catch { /* 忽略 */ }
 }
 
 async function applyContentCardStyle(style = contentCardStyle.value) {
@@ -1975,6 +2044,7 @@ async function loadTheme() {
     const theme = await ShellService.GetTheme()
     currentTheme.value = theme || 'default'
     document.body.dataset.theme = currentTheme.value
+    void syncTitleBarColour()
   } catch (e) { handleError(e) }
 }
 
@@ -2240,20 +2310,6 @@ onBeforeUnmount(() => {
 
     <!-- 直播 -->
     <section v-if="mode === 'live'" class="layout live">
-      <aside class="groups">
-        <button :class="{ active: activeGroup === '__fav__' }" @click="loadFavorites">⭐ 收藏</button>
-        <hr />
-        <button v-for="g in groups" :key="g" :class="{ active: g === activeGroup }" :title="g === '*' ? '全部' : g" @click="activeGroup = g; reloadChannels()">
-          <span class="g-clip"><span class="g-name">{{ g === '*' ? '全部' : g }}</span></span>
-        </button>
-      </aside>
-
-      <aside class="player">
-        <p v-if="liveNowPlaying" class="now">正在播放：{{ liveNowPlaying }}</p>
-        <p v-if="livePlaybackStatus === 'error'" class="playback-error" aria-live="assertive">频道播放失败：{{ livePlaybackError }}</p>
-        <PlaybackView ref="livePlayerRef" :plan="livePagePlaybackPlan" :mpv-paused="mpvPaused" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" :live-subtitle="liveSubtitleText" :live-subtitle-enabled="liveSubtitleSettings.Enabled" :live-audio-pusher="liveAudioPusher" @fallback="(id, position) => fallbackToMpv('live', id, livePlaybackToken, position)" @toggle-pause="toggleMpvPause" />
-      </aside>
-
       <section class="channels">
         <div v-if="groups.length <= 1" class="load-live">
           <p>直播源尚未加载</p>
@@ -2261,14 +2317,23 @@ onBeforeUnmount(() => {
           <span v-if="importProgress && importProgress.Stage === 'live'" class="progress">{{ importProgress.Message }}</span>
         </div>
         <form class="search" @submit.prevent="doSearch"><input v-model="query" placeholder="搜索频道" /><button type="submit">搜索</button></form>
+        <div class="live-controls">
+          <ThemedSelect :model-value="activeGroup" :options="liveGroupOptions" aria-label="分类" @update:model-value="selectLiveGroup" />
+          <button type="button" class="live-fav-toggle" :class="{ active: liveFavOnly }" :aria-pressed="liveFavOnly" title="只看收藏" @click="toggleLiveFavorites">{{ liveFavOnly ? '★' : '☆' }}</button>
+        </div>
         <ul>
-          <li v-for="c in channels" :key="c.ID" class="channel">
+          <li v-for="c in channels" :key="c.ID" class="channel" @click="play(c)">
             <span class="name" :title="c.Name"><span class="name-text">{{ c.Name }}</span></span>
-            <button title="播放" aria-label="播放" @click="play(c)">▶</button>
-            <button :title="c.Favorited ? '取消收藏' : '收藏'" :aria-label="c.Favorited ? '取消收藏' : '收藏'" @click="toggleFav(c)">{{ c.Favorited ? '★' : '☆' }}</button>
+            <button :title="c.Favorited ? '取消收藏' : '收藏'" :aria-label="c.Favorited ? '取消收藏' : '收藏'" @click.stop="toggleFav(c)">{{ c.Favorited ? '★' : '☆' }}</button>
           </li>
         </ul>
       </section>
+
+      <aside class="player">
+        <p v-if="liveNowPlaying" class="now">正在播放：{{ liveNowPlaying }}</p>
+        <p v-if="livePlaybackStatus === 'error'" class="playback-error" aria-live="assertive">频道播放失败：{{ livePlaybackError }}</p>
+        <PlaybackView ref="livePlayerRef" :plan="livePagePlaybackPlan" :mpv-paused="mpvPaused" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" :live-subtitle="liveSubtitleText" :live-subtitle-enabled="liveSubtitleSettings.Enabled" :live-audio-pusher="liveAudioPusher" @fallback="(id, position) => fallbackToMpv('live', id, livePlaybackToken, position)" @toggle-pause="toggleMpvPause" />
+      </aside>
 
       <div v-if="liveToast" class="app-toast" role="status" aria-live="polite">{{ liveToast }}</div>
     </section>
@@ -2277,7 +2342,6 @@ onBeforeUnmount(() => {
     <section v-if="mode === 'vod'" class="vod">
       <div v-if="vodView === 'list'" class="vod-toolbar">
         <ThemedSelect v-if="vodLines.length > 1" v-model="activeLine" :options="vodLineOptions" aria-label="线路" @update:model-value="selectLine" />
-        <ThemedSelect v-model="activeSite" :options="vodSiteOptions" aria-label="站点" @update:model-value="selectSite" />
       </div>
 
       <!-- 点播筛选 chip 行：点选即应用，不再弹层确认。 -->
@@ -2544,14 +2608,17 @@ onBeforeUnmount(() => {
                     @click="playEpisode(ep)">{{ ep.Name }}</button>
           </div>
         </section>
-        <section v-if="similarItems.length" class="vod-similar">
+        <section class="vod-similar">
           <h3>更多类似内容</h3>
+          <p v-if="similarLoading" class="home-empty">正在全网找同类…</p>
           <ContentCardList
+            v-else-if="similarItems.length"
             list-class="netflix-row"
             :items="similarItems"
             :style="'grid'"
-            @select="(i) => openSimilarVodDetail(similarSourceItems[i])"
+            @select="(i) => openSimilarVodDetail(similarNetworkItems[i])"
           />
+          <p v-else class="home-empty">全网没找到同类内容</p>
         </section>
       </div>
     </div>

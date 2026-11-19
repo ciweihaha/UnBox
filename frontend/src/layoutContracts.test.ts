@@ -12,7 +12,10 @@ describe('live layout contract', () => {
   })
 
   it('uses a breakpoint for a stacked player layout on narrow windows', () => {
-    expect(stylesheet).toMatch(/@media \(max-width: 900px\)[\s\S]*grid-template-areas:[\s\S]*"player"[\s\S]*"groups"[\s\S]*"channels"/)
+    // 2026-11-19 直播改两栏：窄屏上下叠放（播放区在上、频道列表在下），
+    // 不再有左边的分类栏。
+    expect(stylesheet).toMatch(/@media \(max-width: 900px\)[\s\S]*grid-template-areas:[\s\S]*"player"[\s\S]*"channels"/)
+    expect(stylesheet).not.toMatch(/@media \(max-width: 900px\)[\s\S]*grid-template-areas:[\s\S]*"groups"/)
   })
 })
 
@@ -374,5 +377,46 @@ describe('Cloudflare 点播源下拉框契约', () => {
 
   it('选了下拉框的源就保存并拉取', () => {
     expect(app).toMatch(/function onCfVodSourceSelect[\s\S]*?saveCfVodUrl\(\)/)
+  })
+})
+
+describe('详情上下两栏严格等高契约', () => {
+  // 2026-11-19：详情页右边简介栏必须和左边播放区完全一样高，顶对齐、底对齐，
+  // 不是大概齐平。实现：上半区 grid 两列拉伸对齐，信息栏不再把行撑高，
+  // 内容超高时在栏内滚动。
+  it('上半区两列拉伸对齐，信息栏受播放区高度约束、超高时栏内滚动', () => {
+    expect(stylesheet).toMatch(/\.vod-detail-top\s*\{[^}]*align-items:\s*stretch;/s)
+    expect(stylesheet).toMatch(/\.vod-detail-info\s*\{[^}]*min-height:\s*0;/s)
+    expect(stylesheet).toMatch(/\.vod-detail-info\s*\{[^}]*overflow-y:\s*auto;/s)
+  })
+})
+
+describe('更多类似内容收窄契约', () => {
+  // 2026-11-19：类似内容那一栏不要搞那么高，卡片收窄、行距收紧。
+  it('类似内容卡片比首页行小一圈、行内边距收紧', () => {
+    expect(stylesheet).toMatch(/\.vod-similar \.netflix-row \.content-card\s*\{[^}]*width:\s*120px;/s)
+    expect(stylesheet).toMatch(/\.vod-similar \.netflix-row\.content-card-grid\s*\{[^}]*gap:\s*0\.4rem;/s)
+  })
+})
+
+describe('直播页铺满屏幕高度契约', () => {
+  // 2026-11-19：直播页太窄、播放区下面空一大块。宽屏下单行网格占满容器高度，
+  // 播放区拉满、左右两栏跟着拉满到底部，不留空渐变区。窄屏仍上下叠放滚动。
+  it('宽屏下直播网格单行占满高度，播放器随列拉伸', () => {
+    expect(stylesheet).toMatch(/@media \(min-width: 901px\)[\s\S]*?\.layout\.live\s*\{[^}]*grid-template-rows:\s*minmax\(0, 1fr\);/s)
+    expect(stylesheet).toMatch(/@media \(min-width: 901px\)[\s\S]*?\.layout\.live \.player\s*\{[^}]*display:\s*flex;/s)
+    expect(stylesheet).toMatch(/@media \(min-width: 901px\)[\s\S]*?\.layout\.live \.player \.playback-view\s*\{[^}]*flex:\s*1 1 auto;/s)
+    expect(stylesheet).toMatch(/@media \(min-width: 901px\)[\s\S]*?\.layout\.live \.player \.playback-view\s*\{[^}]*aspect-ratio:\s*auto;/s)
+  })
+})
+
+describe('点播页站点下拉框取消契约', () => {
+  // 2026-11-19：首页（点播页）顶部不再显示源下拉框（聚合万能源…），只显示内容；
+  // 源切换留在设置里。线路下拉框保留（那是同一站点内的线路，不是源）。
+  it('点播工具栏没有站点下拉框，只留线路下拉框', () => {
+    expect(app).not.toContain('aria-label="站点"')
+    expect(app).toContain('aria-label="线路"')
+    expect(app).not.toContain('vodSiteOptions')
+    expect(app).not.toContain('selectSite')
   })
 })

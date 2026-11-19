@@ -4,6 +4,10 @@ export interface VodPageMeta {
   HasMore: boolean
 }
 
+// VOD_LIST_PREFETCH_PAGES 换分类后默认多拉的页数（首屏 1 页之外再追加 2 页，
+// 共 3 页约 60 条）：每分类只给一页太少，用户要「多放一些」。
+export const VOD_LIST_PREFETCH_PAGES = 2
+
 export function nextVodPage(page: number): number {
   return Math.max(1, page + 1)
 }

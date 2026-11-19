@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appendVodItems, hasNextVodPage, listAtBottom, nextVodPage } from './vodPagination'
+import { appendVodItems, hasNextVodPage, listAtBottom, nextVodPage, VOD_LIST_PREFETCH_PAGES } from './vodPagination'
 
 describe('vod pagination', () => {
   it('starts at page one and advances one page at a time', () => {
@@ -32,5 +32,10 @@ describe('vod pagination', () => {
     expect(listAtBottom(1000, 697, 300)).toBe(true)
     // 还有 10px 未看完：不算到底
     expect(listAtBottom(1000, 690, 300)).toBe(false)
+  })
+
+  it('换分类后默认多拉两页（共 3 页约 60 条），每分类不只一页', () => {
+    // 每分类只给一页太少，用户要「多放一些」；3 页是默认量。
+    expect(VOD_LIST_PREFETCH_PAGES).toBe(2)
   })
 })

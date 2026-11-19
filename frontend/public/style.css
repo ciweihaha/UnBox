@@ -302,27 +302,18 @@ body {
 
 /* 直播页：播放器优先分配空间，分组/频道面板收窄为固定列 */
 .layout.live {
-  grid-template-columns: minmax(120px, 180px) minmax(320px, 1fr) minmax(220px, 320px);
+  /* 直播两栏：左边频道列表、右边播放区（和 TiviMateWin 一样）。 */
+  grid-template-columns: minmax(280px, 380px) minmax(320px, 1fr);
   padding: calc(var(--nav-h) + 1rem) 4% 2rem;
 }
 
 /* 中等宽度：再压两侧面板，保住播放器 */
 @media (min-width: 901px) and (max-width: 1200px) {
   .layout.live {
-    grid-template-columns: 140px minmax(280px, 1fr) 240px;
+    grid-template-columns: 260px minmax(280px, 1fr);
   }
 }
 
-.groups {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  padding: 0.6rem;
-  overflow-y: auto;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 0.5rem;
-}
 /* 全局细滚动条：直播页风格应用到全部容器。
    firefox 走 scrollbar-width/scrollbar-color，webkit 走 ::-webkit-scrollbar 伪元素。 */
 * {
@@ -342,57 +333,6 @@ body {
 }
 *::-webkit-scrollbar-thumb:hover {
   background: var(--text-dim);
-}
-
-.groups button {
-  text-align: left;
-  min-width: 0;
-  padding: 0.4rem 0.6rem;
-  font-size: 0.9rem;
-  color: var(--text-soft);
-  background: transparent;
-  border: none;
-  border-radius: 0.35rem;
-  cursor: pointer;
-}
-/* 长分类名单行省略 + 悬停滚动：裁剪容器用非按钮的 .g-clip（WebKitGTK 对 button
-   开 overflow:hidden 会纵向裁字），文本悬停复用频道名的 marquee 动画。 */
-.groups button .g-clip {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  /* 超长分类名右侧边缘淡出，取代生硬的直切。只做右侧：文本贴容器左缘，
-     左侧加渐变会淡掉短文本开头。短文本右侧淡出区落在空白处，不受影响。 */
-  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 1rem), transparent 100%);
-  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 1rem), transparent 100%);
-}
-.groups button .g-name {
-  display: inline-block;
-  min-width: 100%;
-  width: max-content;
-  overflow: hidden;
-  vertical-align: bottom;
-}
-.groups button:hover .g-name {
-  overflow: visible;
-  animation: channel-name-marquee 5s ease-in-out infinite alternate;
-}
-
-.groups button:hover {
-  background: var(--btn-bg);
-}
-
-.groups button.active {
-  background: var(--btn-active-bg);
-  color: var(--text-white);
-}
-
-.groups hr {
-  width: 100%;
-  margin: 0.4rem 0;
-  border: none;
-  border-top: 1px solid var(--panel-border);
 }
 
 .channels {
@@ -712,10 +652,38 @@ body {
 
 .channels ul {
   flex: 1;
+  min-height: 0;
   margin: 0;
   padding: 0;
   list-style: none;
   overflow-y: auto;
+}
+
+/* 直播左栏控制行：分类下拉框 + 收藏星标开关。 */
+.live-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--panel-border);
+}
+.live-controls .themed-select {
+  flex: 1;
+  min-width: 0;
+}
+.live-fav-toggle {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.7rem;
+  font-size: 1rem;
+  color: var(--text);
+  background: var(--btn-bg);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+.live-fav-toggle.active {
+  background: var(--btn-active-bg);
+  color: var(--text-white);
 }
 
 .channel {
@@ -723,6 +691,13 @@ body {
   align-items: center;
   gap: 0.5rem;
   padding: 0.45rem 0.6rem;
+  cursor: pointer;
+}
+
+/* 点行即播：整行可点，悬停给反馈。 */
+.channel:hover {
+  background: var(--row-alt);
+}
   border-bottom: 1px solid var(--row-alt);
 }
 
@@ -763,12 +738,14 @@ body {
   flex-shrink: 0;
 }
 
-/* 详情页上半区：左是播放区、右是海报+介绍；窄窗时上下叠放，播放区仍在上。 */
+/* 详情页上半区：左是播放区、右是海报+介绍；窄窗时上下叠放，播放区仍在上。
+   两栏严格等高（顶对齐、底对齐）：grid 两列拉伸对齐，行高由播放区定，
+   信息栏不再把行撑高，内容超高时在栏内滚动。 */
 .vod-detail-top {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
   gap: 1rem;
-  align-items: start;
+  align-items: stretch;
   margin-bottom: 1rem;
 }
 
@@ -799,6 +776,8 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
   padding: 0.75rem;
   background: var(--panel);
   border: 1px solid var(--panel-border);
@@ -986,6 +965,31 @@ body {
 .layout.live .player .playback-view {
   min-height: min(50vh, 480px);
   aspect-ratio: 16 / 9;
+}
+
+/* 直播页铺满屏幕高度（宽屏）：单行网格占满容器高度（顶部导航以下到底部），
+   播放区随列拉伸、左右两栏跟着拉满，不留下面那块空渐变区。
+   窄屏仍走下面的 max-width: 900px 叠放滚动，不动它。 */
+@media (min-width: 901px) {
+  .layout.live {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .layout.live .player {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .layout.live .player .playback-view {
+    flex: 1 1 auto;
+    min-height: 0;
+    aspect-ratio: auto;
+  }
+
+  .layout.live .channels {
+    min-height: 0;
+  }
 }
 
 .playback-view { position: relative; width: 100%; background: var(--deep); min-height: 180px; aspect-ratio: 16 / 9; display: grid; place-items: center; overflow: hidden; }
@@ -1332,18 +1336,18 @@ body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
       "player"
-      "groups"
       "channels";
     overflow-y: auto;
   }
 
-  .layout > .groups { grid-area: groups; }
   .layout > .player { grid-area: player; min-height: 260px; }
   .layout > .channels { grid-area: channels; min-height: 18rem; }
 }
-/* 简介默认限 3 行 + 展开/收起；展开后放开全部。 */
+/* 简介默认限 3 行 + 展开/收起；展开后放开全部。
+   min-height: 0 让简介在等高信息栏里能收能缩，不把栏撑高。 */
 .vod-detail .desc {
   flex: 1 1 auto;
+  min-height: 0;
   color: var(--text-desc);
   line-height: 1.6;
   display: -webkit-box;
@@ -2412,7 +2416,6 @@ body[data-theme="aurora"] {
   background-attachment: fixed;
 }
 
-[data-theme="aurora"] .groups,
 [data-theme="aurora"] .channels,
 [data-theme="aurora"] .player,
 [data-theme="aurora"] .vod-main,
@@ -2481,7 +2484,6 @@ body[data-theme="wood"] {
   background-attachment: fixed;
 }
 
-[data-theme="wood"] .groups,
 [data-theme="wood"] .channels,
 [data-theme="wood"] .player,
 [data-theme="wood"] .vod-main,
@@ -2566,7 +2568,6 @@ body[data-theme="ocean"] {
 
 [data-theme="ocean"] .home,
 [data-theme="ocean"] .favorites-page,
-[data-theme="ocean"] .groups,
 [data-theme="ocean"] .channels,
 [data-theme="ocean"] .player,
 [data-theme="ocean"] .vod-main,
@@ -2642,7 +2643,6 @@ body[data-theme="8bit"],
 }
 
 [data-theme="8bit"] .topnav .nav-links button.active,
-[data-theme="8bit"] .groups button.active,
 [data-theme="8bit"] .ep-pagination button.active,
 [data-theme="8bit"] .ep-src-tabs button.active,
 [data-theme="8bit"] .ep-list button.active,
@@ -3317,11 +3317,22 @@ body[data-theme="8bit"],
 }
 
 .vod-similar {
-  padding: 0.5rem 0 1.5rem;
+  padding: 0.4rem 0 1rem;
 }
 
 .vod-similar h3 {
-  margin: 0 0 0.6rem;
+  margin: 0 0 0.4rem;
   padding: 0 4%;
-  font-size: 1.3rem;
+  font-size: 1.2rem;
+}
+
+/* 类似内容栏收窄：卡片小一圈（120px，首页行是 160px）、行内边距收紧，
+   别占那么大一块。 */
+.vod-similar .netflix-row.content-card-grid {
+  gap: 0.4rem;
+  padding: 0.3rem 4% 0.6rem;
+}
+
+.vod-similar .netflix-row .content-card {
+  width: 120px;
 }
