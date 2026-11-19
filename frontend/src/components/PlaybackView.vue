@@ -697,6 +697,9 @@ async function attach(plan: PlaybackPlan | null) {
   if (generation !== attachGeneration || plan !== props.plan) return
   const element = video.value
   if (!element) return
+  // 挂上计划就开始盯停滞：流根本起不来（一直没 playing 事件）时，
+  // 只在 onPlay 里启动检测就永远等不到，播失败也无人管。
+  ensureStallDetector().start()
   // 用户选过的倍速在切集/换源后继续保持。
   element.playbackRate = playbackRate.value
   applyRotation()

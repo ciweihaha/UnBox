@@ -95,15 +95,17 @@ function Search-Vod {
     Send-Key '{ENTER}'
     $hit = Wait-For { Find-Element -Root $script:Win -Name $Query } -Seconds 30
     if ($hit) {
-      # 别点到搜索历史小按钮（名字也是查询词、只有 26px 高）：只点卡片
-      #（结果卡片高 200+）；历史按钮点开只会重搜，进不了详情。
+      # 点卡片：名字是查询词的元素里有搜索历史小按钮（26px 高的 Button），
+      # 点它只会重搜、进不了详情；跳过小按钮，从标题文本往上找卡片容器再点。
       $card = $null
       $cands = Find-Elements -Root $script:Win -NameLike "*$Query*"
       foreach ($c in $cands) {
         try {
           $r = $c.Current.BoundingRectangle
-          if ($r.Height -ge 40) { $card = $c; break }
-        } catch { }
+          if ($c.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $r.Height -lt 40) { continue }
+        } catch { continue }
+        $card = $c
+        break
       }
       if (-not $card) { $card = $hit }
       Invoke-ElementOrAncestor $card | Out-Null
@@ -327,10 +329,20 @@ $liveList = Find-Element -Root $script:Win -Name 'CCTV'
 Test-WheelScrolls -Id 'T12' -Name '滚轮：直播列表能滚' -X ([int]($wr.X + 200)) -Y ([int]($wr.Y + $wr.Height / 2))
 Shot -Tag 'live' | Out-Null
 # 先点第一行播起来（播放器、进度条都是播后才出现），再量两栏与播放区。
+# CCTV-1 偶尔起不来（源不稳）：20 秒没进度就换 CCTV-2 再试，记下用的台。
 $firstRow = Find-Element -Root $script:Win -Name 'CCTV-1'
 if (-not $firstRow) { $firstRow = Find-Element -Root $script:Win -Name 'CCTV' }
 if ($firstRow) { Invoke-Element $firstRow | Out-Null }
 $p0 = Wait-PlayerProgress -Seconds 20
+$liveChannelUsed = 'CCTV-1'
+if ($null -eq $p0 -or $p0 -le 0) {
+  $secondRow = Find-Element -Root $script:Win -Name 'CCTV-2'
+  if ($secondRow) {
+    Invoke-Element $secondRow | Out-Null
+    $p0 = Wait-PlayerProgress -Seconds 20
+    $liveChannelUsed = 'CCTV-2'
+  }
+}
 $playerGroup = Find-PlayerGroup
 $pgRect = Get-ElementRect $playerGroup
 Add-Result -Id 'T14' -Name '直播两栏：左列表右播放' -Pass (($null -ne $liveList) -and ($null -ne $playerGroup)) -Evidence "list=$($null -ne $liveList) playerW=$($pgRect.Width)"
@@ -367,7 +379,7 @@ if (-not $pass16) {
   $p2 = Get-PlayerProgress
   $pass16 = ($null -ne $p1 -and $null -ne $p2 -and $p2 -gt $p1)
 }
-Add-Result -Id 'T16' -Name '直播点播后进度前进' -Pass $pass16 -Evidence "p1=$p1 p2=$p2"
+Add-Result -Id 'T16' -Name '直播点播后进度前进' -Pass $pass16 -Evidence "channel=$liveChannelUsed p1=$p1 p2=$p2"
 # 空格暂停/继续。
 Send-Key ' '
 Start-Sleep -Seconds 3
@@ -500,17 +512,24 @@ Shot -Tag 'settings' | Out-Null
 # aria-label（“Cloudflare 点播源”），可见的源名是里面的 span；
 # 点开后选项是 role=option 的按钮，名字就是源名。
 $cfTrigger = $null
-$all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-foreach ($e in $all) {
-  try {
-    # 触发器按钮的名字就是 aria-label；别直接按名字找，会先撞到旁边的 label 文本。
-    if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $e.Current.Name -eq 'Cloudflare 点播源') { $cfTrigger = $e; break }
-  } catch { }
+$opened = $false
+# 设置页会异步重渲染（CF 目录拉到后下拉框重建），缓存的元素可能过期：
+# 每次重找、最多试 3 次。
+for ($try = 1; $try -le 3 -and -not $opened; $try++) {
+  $cfTrigger = $null
+  $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  foreach ($e in $all) {
+    try {
+      # 触发器按钮的名字就是 aria-label；别直接按名字找，会先撞到旁边的 label 文本。
+      if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $e.Current.Name -eq 'Cloudflare 点播源') { $cfTrigger = $e; break }
+    } catch { }
+  }
+  if ($cfTrigger) { $opened = Invoke-Element $cfTrigger }
+  if (-not $opened) { Start-Sleep -Seconds 2 }
 }
 $cfEv = 'no-dropdown-trigger'
 $cfPass = $false
-if ($cfTrigger) {
-  $opened = Invoke-Element $cfTrigger
+if ($opened) {
   Start-Sleep -Seconds 2
   $opts = @()
   $all2 = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
