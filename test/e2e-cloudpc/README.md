@@ -41,8 +41,14 @@ Start-ScheduledTask -TaskName 'UB-E2E'
 - 进度用 `.ctrl-seek` 的 RangeValuePattern 读；读不到时退到 `.ctrl-time` 文本。
 - 报错 toast 的触发路径：设置页填一个连不上的点播源地址再点导入。
 - 测的时候留意“悄悄退出”：每步都查进程在不在，soak 每分钟记一次。
-- **搜索框填字必须用剪贴板粘贴**：ValuePattern.SetValue 不触发 Vue 的
-  v-model，框里有字、app 里还是空，搜不到；粘贴（`Set-InputText`）才行。
+- **搜索框填字用 ValuePattern.SetValue**：Chromium 的 SetValue 会发 input
+  事件，Vue 的 v-model 能收到（实测：设完 5 秒出 26 张卡）。设完读回经常
+  是空（元素过期），不要拿读回值验，拿搜索结果验。不要用剪贴板粘贴/
+  键盘打字：这台云电脑上 SendKeys 发不到输入框里（窗口前台、焦点、
+  激活都试过，全都不进；0.9.16 轮的粘贴法在这里行不通）。
+- **点台/点卡片要拿对元素**：行里的台名文本和行同名，Find-Element 会先
+  撞到文本（点它没用）；点台用 ListItem 行，点卡片跳过 26px 高的历史
+  小按钮、从标题文本往上找卡片容器；点卡后等详情打开（最多 30 秒）。
 - **进度读 `.ctrl-time` 文本**：直播的 range input 值恒为 0，读 slider
   永远是 0；文本“mm:ss / mm:ss”才是真实进度。
 - **星标按位置找，不要按名字**：★/☆ 按钮的名字在 UIA 里不稳定，
