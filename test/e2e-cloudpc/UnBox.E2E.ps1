@@ -445,7 +445,7 @@ foreach ($e in $all) {
 $cfEv = 'no-combobox'
 $cfPass = $false
 if ($cfCombo) {
-  Invoke-Element $cfCombo | Out-Null
+  Expand-Element $cfCombo | Out-Null
   Start-Sleep -Seconds 2
   $opts = @()
   $all2 = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)

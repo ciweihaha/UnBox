@@ -83,6 +83,17 @@ function Invoke-Element {
   } catch { return $false }
 }
 
+function Expand-Element {
+  param([System.Windows.Automation.AutomationElement]$El)
+  if (-not $El) { return $false }
+  try {
+    $p = $El.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+    $p.Expand()
+    return $true
+  } catch { }
+  return (Invoke-Element $El)
+}
+
 function Get-ElementText {
   param([System.Windows.Automation.AutomationElement]$El)
   if (-not $El) { return '' }
