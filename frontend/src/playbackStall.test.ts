@@ -26,6 +26,63 @@ describe('PlaybackStallDetector', () => {
     }
   })
 
+  it('起播宽限内没进度也不判死（慢台不被无限重连）', () => {
+    vi.useFakeTimers()
+    try {
+      const onStall = vi.fn()
+      let now = 0
+      const d = new PlaybackStallDetector(10_000, onStall, () => now)
+      d.start()
+      now = 10_000
+      vi.advanceTimersByTime(10_000)
+      expect(onStall).not.toHaveBeenCalled()
+      now = 29_000
+      vi.advanceTimersByTime(20_000)
+      expect(onStall).not.toHaveBeenCalled()
+      d.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('超起播宽限仍没进度才判死', () => {
+    vi.useFakeTimers()
+    try {
+      const onStall = vi.fn()
+      let now = 0
+      const d = new PlaybackStallDetector(10_000, onStall, () => now)
+      d.start()
+      now = 30_000
+      vi.advanceTimersByTime(2_000)
+      expect(onStall).toHaveBeenCalledTimes(1)
+      d.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('播起来后按停滞阈值判（从最后一次进度起算，与起播宽限无关）', () => {
+    vi.useFakeTimers()
+    try {
+      const onStall = vi.fn()
+      let now = 0
+      const d = new PlaybackStallDetector(10_000, onStall, () => now)
+      d.start()
+      d.progress(5)
+      now = 5_000
+      d.progress(6)
+      now = 14_999
+      vi.advanceTimersByTime(10_000)
+      expect(onStall).not.toHaveBeenCalled()
+      now = 15_000
+      vi.advanceTimersByTime(2_000)
+      expect(onStall).toHaveBeenCalledTimes(1)
+      d.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('进度前进刷新时钟，不误判', () => {
     vi.useFakeTimers()
     try {
