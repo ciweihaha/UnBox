@@ -11,6 +11,9 @@ $end = (Get-Date).AddSeconds(60)
 while ((Get-Date) -lt $end -and -not $win) { $win = Get-UnBoxWindowForPid -ProcessId $proc.Id; Start-Sleep -Milliseconds 500 }
 "window: $($null -ne $win)" | Out-File $out -Append
 if (-not $win) { "no window" | Out-File $out -Append; exit 1 }
+$script:Win = $win
+Set-ActiveWindow -Window $win
+"activated window" | Out-File $out -Append
 
 function Find-SearchBox {
   $all = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)

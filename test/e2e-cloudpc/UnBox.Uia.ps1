@@ -20,6 +20,8 @@ public static class NativeInput {
   [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, int dwData, UIntPtr dwExtraInfo);
   public const uint MOUSEEVENTF_WHEEL = 0x0800;
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 }
 "@
 
@@ -184,6 +186,20 @@ function Send-Key {
   Start-Sleep -Milliseconds 300
 }
 
+function Set-ActiveWindow {
+  param([System.Windows.Automation.AutomationElement]$Window)
+  if (-not $Window) { return }
+  try { $Window.SetFocus() } catch { }
+  try {
+    $h = $Window.Current.NativeWindowHandle
+    if ($h) {
+      [NativeInput]::ShowWindow([IntPtr]$h, 9) | Out-Null
+      [NativeInput]::SetForegroundWindow([IntPtr]$h) | Out-Null
+    }
+  } catch { }
+  Start-Sleep -Milliseconds 500
+}
+
 function Click-At {
   param([int]$X, [int]$Y)
   Move-Mouse -X $X -Y $Y
@@ -194,13 +210,14 @@ function Click-At {
 
 # Set-InputText 往输入框填中文：不要用 ValuePattern.SetValue——它不触发
 # Vue 的 v-model，框里有字、app 里还是空；剪贴板粘贴（0.9.16 轮验证过）才行。
-# 粘贴前先鼠标点一下框中心拿焦点（UIA SetFocus 在 WebView2 里经常落不上）。
+# 粘贴前先激活窗口再点框拿焦点（窗口不是前台时 SendKeys 发不到输入框里）。
 function Set-InputText {
   param(
     [System.Windows.Automation.AutomationElement]$Edit,
     [string]$Text
   )
   if (-not $Edit) { return $false }
+  Set-ActiveWindow -Window $script:Win
   try {
     $r = $Edit.Current.BoundingRectangle
     Click-At -X ([int]($r.X + $r.Width / 2)) -Y ([int]($r.Y + $r.Height / 2))
