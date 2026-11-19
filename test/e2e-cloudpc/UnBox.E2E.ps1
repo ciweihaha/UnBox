@@ -424,6 +424,23 @@ Add-Result -Id 'T29a' -Name '点播能播（进度前进）' -Pass ($null -ne $q
 $detailPlayer = Find-PlayerGroup
 $dpRect = Get-ElementRect $detailPlayer
 Add-Result -Id 'T30' -Name '详情是整页（播放区宽≥700）' -Pass (($null -ne $detailPlayer) -and $dpRect.Width -ge 700) -Evidence "playerW=$($dpRect.Width) playerH=$($dpRect.Height)"
+# 详情左右等高（T29b）：信息栏是 grid 右列（align-items: stretch），
+# 顶 = 行顶、底 = 行底。信息栏容器本身 UIA 不暴露，用两处量：
+# 栏内 h2 标题顶（栏顶 + 12px 内边距）≈ 播放器顶（±16，含“正在播放”行）；
+# 选集区首个线路页签顶（行底 + 16px 间距）− 播放器底 ≈ 16（±10）。
+# 上下叠放时两处都会差出几百像素。
+$wr = Get-WindowRect
+$titleEls = Find-Elements -Root $script:Win -NameLike '荒野求生*'
+$h2Rect = $null
+foreach ($e in $titleEls) { $r = Get-ElementRect $e; if ($r -and $r.X -gt ($wr.X + $wr.Width / 2)) { $h2Rect = $r; break } }
+$tabBtns = Find-Elements -Root $script:Win -NameLike '线路*'
+$tabRect = $null
+if ($tabBtns.Count -ge 1) { $tabRect = Get-ElementRect $tabBtns[0] }
+$topOk = $h2Rect -and [Math]::Abs($h2Rect.Y - $dpRect.Y) -le 16
+$botGap = $null
+if ($tabRect) { $botGap = $tabRect.Y - ($dpRect.Y + $dpRect.Height) }
+$botOk = ($null -ne $botGap) -and [Math]::Abs($botGap - 16) -le 10
+Add-Result -Id 'T29b' -Name '详情左右等高（信息栏与播放区顶底对齐）' -Pass ($topOk -and $botOk) -Evidence "h2Top=$($h2Rect.Y) playerTop=$($dpRect.Y) tabTop=$($tabRect.Y) playerBottom=$($dpRect.Y + $dpRect.Height) gap=$botGap"
 Shot -Tag 'detail-manvs' | Out-Null
 Send-Key ' '
 Start-Sleep -Seconds 3
