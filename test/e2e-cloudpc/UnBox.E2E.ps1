@@ -695,6 +695,7 @@ Shot -Tag 'detail-xiaocheng' | Out-Null
 $similarCards = @()
 $similarCardW = $null
 $similarCardWs = @()
+$script:FirstSimilarDiag = $null
 $similarTitle = Find-Element -Root $script:Win -Name '更多类似内容'
 if ($similarTitle) {
   $end = (Get-Date).AddSeconds(30)
@@ -716,6 +717,14 @@ if ($similarTitle) {
           $found += $n
           $foundWs += [int]$r.Width
           if ($null -eq $foundW) { $foundW = $r.Width }
+          # 诊断：第一个量到的元素到底是什么（Type + UIA 类名 + 矩形）。
+          # 卡片三轮都是 151px，但 CSS 上必为 120px（!important），要确认
+          # 量到的是 li.content-card 还是别的元素（如海报/标题）。
+          if (-not $script:FirstSimilarDiag) {
+            $cls = ''
+            try { $cls = $e.Current.ClassName } catch { }
+            $script:FirstSimilarDiag = "type=$t class='$cls' rect=$([int]$r.X),$([int]$r.Y) $([int]$r.Width)x$([int]$r.Height) name='$n'"
+          }
         }
       } catch { }
     }
@@ -728,7 +737,7 @@ $sameTitle = ($similarCards | Where-Object { $_ -like '*小城良方*' }).Count
 Add-Result -Id 'T24' -Name '更多类似内容是不同片名' -Pass ($distinct.Count -ge 3 -and $sameTitle -eq 0) -Evidence "cards=$($similarCards.Count) distinct=$($distinct.Count) sameTitle=$sameTitle similarTitle=$($null -ne $similarTitle) distinctList='$($distinct -join ' | ')'"
 # 首跑 cardW=151：CSS 里类似卡片是 120px、详情海报是 150px，第一个量到的
 # 可能是海报而不是卡片，所以把全部卡宽都记下来，看 151 是个例还是整行都宽。
-Add-Result -Id 'T25' -Name '类似内容卡片收窄（宽≤140）' -Pass ($null -ne $similarCardW -and $similarCardW -le 140) -Evidence "cardW=$similarCardW allWidths='$($similarCardWs -join ',')'"
+Add-Result -Id 'T25' -Name '类似内容卡片收窄（宽≤140）' -Pass ($null -ne $similarCardW -and $similarCardW -le 140) -Evidence "cardW=$similarCardW allWidths='$($similarCardWs -join ',')' firstDiag='$script:FirstSimilarDiag'"
 
 # ---------- 报错 toast 5 秒自消 ----------
 Go-Mode 'settings' | Out-Null
