@@ -3372,8 +3372,11 @@ body[data-theme="8bit"],
 }
 
 .vod-similar .netflix-row .content-card {
-  width: 120px;
-  /* flex 下也按 120px（flex-basis），并封顶，免得被内容或轨道撑大。 */
-  max-width: 120px;
-  flex: 0 0 120px;
+  /* !important：源码里这条已是最后且特异性最高（0,3,0），但实测卡片仍是
+     151px（148px 轨道 + 边框），说明运行期有别的规则/缓存把它压住了；
+     先钉死 120px，若仍 151px 则问题不在特异性、要查缓存与量测。 */
+  width: 120px !important;
+  max-width: 120px !important;
+  flex: 0 0 120px !important;
+  min-width: 120px !important;
 }

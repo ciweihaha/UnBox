@@ -220,21 +220,105 @@ function Find-DeepestPlayerGroup {
   return $found
 }
 
+function Find-PlayerViewGroup {
+  # 播放器列/播放器本身：含 Slider 的 Group 里面积最大、且不是整页容器
+  # 的那一个。最深的 Group 是视频子元素（725x363，底比播放器列短 19px，
+  # T29b 底边 gap 会量成 35 而不是 16）；最外层是整页容器（1233x725）。
+  # 播放器列（约 877x399，顶=行顶、底=行底）才是 T29b 等高要量的对象，
+  # 它是含 Slider 的 Group 里最大的、且宽度不到窗口 95% 的那个。
+  $best = $null
+  $bestArea = 0
+  $wr = Get-WindowRect
+  $maxW = $wr.Width * 0.95
+  $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  foreach ($e in $all) {
+    try {
+      if ($e.Current.ControlType.ProgrammaticName -ne 'ControlType.Group') { continue }
+      $r = $e.Current.BoundingRectangle
+      if ($r.Width -lt 300 -or $r.Height -lt 150) { continue }
+      if ($r.Width -ge $maxW) { continue }
+      $subs = $e.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+      $hasSlider = $false
+      foreach ($s in $subs) {
+        try { if ($s.Current.ControlType.ProgrammaticName -eq 'ControlType.Slider') { $hasSlider = $true; break } } catch { }
+      }
+      if ($hasSlider) {
+        $area = $r.Width * $r.Height
+        if ($area -gt $bestArea) { $bestArea = $area; $best = $e }
+      }
+    } catch { }
+  }
+  return $best
+}
+
 $script:LastLiveDead = @()
+function Select-LiveGroupAll {
+  # 直播分了组（央视/卫视/其他地区），默认只显示当前组的台；中继一断，
+  # 央视组全死，能播的台（BBC/香港/澳门）都在“其他地区直播”组里。
+  # 把分类下拉（ThemedSelect，触发按钮 aria-label 是“分类”）切到“全部”，
+  # 56 台全可见，后面找台才找得到。返回 $true 表示切上了（BBC/香港/
+  # 澳门任一行出现了），$false 表示没切上——找台仍按当前组的行继续试。
+  # 触发器按钮的名字就是 aria-label；别直接按名字找，会先撞到旁边的 label
+  # 文本，要按 ControlType.Button 过滤（同 T28 的 CF 下拉）。
+  $trigger = $null
+  $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  foreach ($e in $all) {
+    try {
+      if ($e.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $e.Current.Name -eq '分类') { $trigger = $e; break }
+    } catch { }
+  }
+  if (-not $trigger) { return $false }
+  $opened = Invoke-Element $trigger
+  if (-not $opened) {
+    # InvokePattern 打不开时退到鼠标点触发器中心。
+    try {
+      $r = $trigger.Current.BoundingRectangle
+      Click-At -X ([int]($r.X + $r.Width / 2)) -Y ([int]($r.Y + $r.Height / 2))
+      $opened = $true
+    } catch { }
+  }
+  if (-not $opened) { return $false }
+  # 选项是 <button role="option">，UIA 里可能是 Button 也可能是 ListItem，
+  # 按名字找、两种类型都认；菜单是 v-if，开了才进 DOM。
+  $opt = Wait-For {
+    $found = $null
+    $all2 = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    foreach ($e in $all2) {
+      try {
+        $t = $e.Current.ControlType.ProgrammaticName
+        if (($t -eq 'ControlType.Button' -or $t -eq 'ControlType.ListItem') -and $e.Current.Name -eq '全部') { $found = $e; break }
+      } catch { }
+    }
+    $found
+  } -Seconds 5
+  if (-not $opt) { return $false }
+  Invoke-Element $opt | Out-Null
+  $ok = Wait-For {
+    (Find-ChannelRow -Root $script:Win -NameLike '*BBC*') -or
+    (Find-ChannelRow -Root $script:Win -NameLike '*香港*') -or
+    (Find-ChannelRow -Root $script:Win -NameLike '*澳门*')
+  } -Seconds 10
+  return ($null -ne $ok)
+}
+
 function Find-WorkingLiveChannel {
   param([string[]]$Exclude = @(), [int]$PerRowSeconds = 20, [int]$MaxRows = 5)
   # 找一条真能播的直播台，返回台名（找不到返回 ''）。
-  # 顺序：CCTV综合优先，其余 CCTV，其次 BBC，再是其它所有行；每类最多试
+  # 先切到“全部”分组（不然只看得到当前组的台）；顺序：CCTV综合优先，
+  # 其余 CCTV，其次 BBC、香港、澳门，再是其它所有行；每类最多试
   # $MaxRows 行（总数不封顶，不然 CCTV 死台一多就永远到不了 BBC）。
   # 中继（SCF）一断就是一片 410，死守 CCTV 会白白浪费时间；点行后要等到
   # 进度 >0 才算播起来（只看状态会误判，报错状态也算“换台成功”）。
-  # 死台不用等满整段：状态一变“频道播放失败”就跳过（403 的台几秒就报错）。
+  # 死台不用等满整段：状态已换成新台名、且同时出现“频道播放失败”就跳过
+  # （403 的台几秒就报错）。只看“频道播放失败”会误判：报错行会残留
+  # （上一个死台的报错还在），后面所有台都会被当成死台。
   # 死台记进 $script:LastLiveDead。注意：'*' 会把已试过的行再列一遍，
-  # 靠 $tried 去重；非频道行被点到也只会读不到进度、被记死，不会误报
-  # （播着的旧台若还在前进，进度读数会归到旧台——这种误报只影响台名，
-  # 不影响“有没有台在播”这个结论）。
+  # 靠 $tried 去重，且跳过前面模式已覆盖的台（CCTV/BBC/香港/澳门），
+  # 不然兜底的 5 个名额又被剩下的 CCTV 行占满。
   $script:LastLiveDead = @()
-  $patterns = @('*CCTV综合*', '*CCTV*', '*BBC*', '*')
+  Select-LiveGroupAll | Out-Null
+  $patterns = @('*CCTV综合*', '*CCTV*', '*BBC*', '*香港*', '*澳门*', '*')
+  $covered = @('*CCTV*', '*BBC*', '*香港*', '*澳门*')
   $tried = @()
   foreach ($pat in $patterns) {
     $rows = Find-ChannelRows -Root $script:Win -NameLike $pat
@@ -244,6 +328,11 @@ function Find-WorkingLiveChannel {
       $nm = ''
       try { $nm = $row.Current.Name } catch { continue }
       if (-not $nm -or $Exclude -contains $nm -or $tried -contains $nm) { continue }
+      if ($pat -eq '*' ) {
+        $isCovered = $false
+        foreach ($c in $covered) { if ($nm -like $c) { $isCovered = $true; break } }
+        if ($isCovered) { continue }
+      }
       $tried += $nm
       $perPat++
       Invoke-Element $row | Out-Null
@@ -254,7 +343,8 @@ function Find-WorkingLiveChannel {
         $elapsed += 2
         $p = Get-PlayerProgress
         if ($null -ne $p -and $p -gt 0) { return $nm }
-        if ((Get-StatusNames) -like '*频道播放失败*') { break }
+        $st = Get-StatusNames
+        if (($st -like "*$nm*") -and ($st -like '*频道播放失败*')) { break }
       }
       $script:LastLiveDead += $nm
     }
@@ -531,9 +621,9 @@ Start-Sleep -Seconds 3
 $q2 = Get-PlayerProgress
 Add-Result -Id 'T29a' -Name '点播能播（进度前进）' -Pass ($null -ne $q1 -and $null -ne $q2 -and $q2 -gt $q1) -Evidence "q1=$q1 q2=$q2"
 # 详情是整页：点集播起来后才有播放器容器，播后再量。
-# 用最深的 Group（真播放器）：Find-PlayerGroup 返回的是最外层容器（约等于视口），
-# 拿它量 T29b 等高会恒错。
-$detailPlayer = Find-DeepestPlayerGroup
+# 用播放器列（最大且不是整页容器的含 Slider Group）：最深的 Group 是视频
+# 子元素（底比播放器列短 19px，T29b 底边 gap 会量成 35）；最外层是整页容器。
+$detailPlayer = Find-PlayerViewGroup
 $dpRect = Get-ElementRect $detailPlayer
 Add-Result -Id 'T30' -Name '详情是整页（播放区宽≥700）' -Pass (($null -ne $detailPlayer) -and $dpRect.Width -ge 700) -Evidence "playerW=$($dpRect.Width) playerH=$($dpRect.Height)"
 # 详情左右等高（T29b）：信息栏是 grid 右列（align-items: stretch），
@@ -541,8 +631,9 @@ Add-Result -Id 'T30' -Name '详情是整页（播放区宽≥700）' -Pass (($nu
 # 栏内 h2 标题顶（栏顶 + 12px 内边距）≈ 播放器顶（±24，“正在播放”行约 28px，
 # 播放器顶含这行，h2 顶不含，所以差值约 -16，容差放宽到 24 才稳）；
 # 选集区首个线路页签顶（行底 + 16px 间距）− 播放器底 ≈ 16（±10）。
-# 上下叠放时两处都会差出几百像素。$dpRect 必须是真播放器（最深的 Group），
-# 用外层容器（约等于视口）量会恒错，见 Find-DeepestPlayerGroup。
+# 上下叠放时两处都会差出几百像素。$dpRect 必须是播放器列（最大且不是整页
+# 容器的含 Slider Group，见 Find-PlayerViewGroup）：最深的 Group 是视频子
+# 元素（底短 19px），最外层是整页容器（约等于视口），拿它俩量都会恒错。
 $wr = Get-WindowRect
 $titleEls = Find-Elements -Root $script:Win -NameLike '荒野求生*'
 $h2Rect = $null
