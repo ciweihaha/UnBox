@@ -6,23 +6,49 @@ const stylesheet = readFileSync('public/style.css', 'utf8')
 const app = readFileSync('src/App.vue', 'utf8')
 const header = readFileSync('src/components/VodDetailHeader.vue', 'utf8')
 
-// 详情弹窗重做（第 2 项）：首页「继续播放」进去的弹窗顶部大留白、简介被挤、
-// 红字「正在播放」飘在顶部、剧集按钮「第01…」被截断、整体比例失衡。
-// 约定：弹窗限宽 1080px 居中、海报 2:3 约 200px、简介默认 clamp 3 行、
-// 「已完结」与收藏排成一行操作区、正在播放收进播放器上方状态行、
-// 剧集按钮自适应列保证「第01集」完整显示；季切换 pills 与「更多类似内容」保持。
+// 详情页重做（v0.9.16）：原来是半透明浮层（背后首页透出来、边上还露着
+// 首页内容），用户要求改成正经的独立详情页；布局也重排：上半部分左是
+// 播放区、右是海报+介绍，下半部分是选集网格。
+// 约定：整页 fixed 盖住首页（不透明底）、播放区左上、海报+介绍右上、
+// 选集在下边整排、简介默认 clamp 3 行、「已完结」与收藏排成一行、
+// 正在播放收进播放器上方状态行、剧集按钮保证「第01集」完整显示、
+// 季切换 pills 与「更多类似内容」保持。
 describe('vod detail redesign', () => {
-  it('limits the modal to about 1080px and centers it', () => {
-    expect(stylesheet).toMatch(/\.vod-detail-modal\s*\{[^}]*max-width:\s*1080px;/s)
-    expect(stylesheet).toMatch(/\.vod-detail-modal\s*\{[^}]*margin:\s*0 auto;/s)
+  it('is a full page, not a floating layer: opaque fixed page covering home', () => {
+    expect(app).toContain('vod-detail-page')
+    expect(app).not.toContain('vod-detail-overlay')
+    expect(app).not.toContain('vod-detail-modal')
+    expect(stylesheet).toMatch(/\.vod-detail-page\s*\{[^}]*position:\s*fixed;/s)
+    expect(stylesheet).toMatch(/\.vod-detail-page\s*\{[^}]*inset:\s*0;/s)
+    // 不透明底色：背后首页一点都不能透出来。
+    expect(stylesheet).toMatch(/\.vod-detail-page\s*\{[^}]*background:\s*var\(--bg\);/s)
+    // 盖住顶部导航（z-index 60），否则导航还飘在详情上面。
+    expect(stylesheet).toMatch(/\.vod-detail-page\s*\{[^}]*z-index:\s*100;/s)
+    expect(stylesheet).not.toContain('.vod-detail-overlay')
+    expect(stylesheet).not.toContain('.vod-detail-modal')
   })
 
-  it('sizes the hero poster to 2:3 at about 200px and lets the info column fill the hero height', () => {
-    expect(stylesheet).toMatch(/\.vod-hero-poster\s*\{[^}]*width:\s*200px;/s)
-    expect(stylesheet).toMatch(/\.vod-hero-poster\s*\{[^}]*aspect-ratio:\s*2 \/ 3;/s)
-    expect(stylesheet).toMatch(/\.vod-hero-body\s*\{[^}]*align-items:\s*stretch;/s)
-    expect(stylesheet).toMatch(/\.vod-hero-info\s*\{[^}]*display:\s*flex;/s)
-    expect(stylesheet).toMatch(/\.vod-hero-info\s*\{[^}]*flex-direction:\s*column;/s)
+  it('lays out the top as player left, poster plus intro right, episodes below', () => {
+    expect(app).toContain('vod-detail-top')
+    expect(app).toContain('vod-detail-player')
+    expect(app).toContain('vod-detail-info')
+    expect(app).toContain('vod-detail-episodes')
+    // 播放区在左、信息区在右，选集在下面整排。
+    expect(stylesheet).toMatch(/\.vod-detail-top\s*\{[^}]*display:\s*grid;/s)
+    const top = app.indexOf('vod-detail-top')
+    const player = app.indexOf('vod-detail-player', top)
+    const info = app.indexOf('vod-detail-info', player)
+    const eps = app.indexOf('vod-detail-episodes', info)
+    expect(player).toBeGreaterThan(-1)
+    expect(info).toBeGreaterThan(player)
+    expect(eps).toBeGreaterThan(info)
+    // 窄窗口上下叠放，播放区仍在上。
+    expect(stylesheet).toMatch(/@media \(max-width: 900px\)[\s\S]*?\.vod-detail-top\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s)
+  })
+
+  it('puts the poster in the info column on the right, 2:3', () => {
+    expect(stylesheet).toMatch(/\.vod-detail-poster\s*\{[^}]*aspect-ratio:\s*2 \/ 3;/s)
+    expect(app).toMatch(/vod-detail-info[\s\S]*?vod-detail-poster/)
   })
 
   it('clamps the synopsis to 3 lines by default', () => {
@@ -30,10 +56,10 @@ describe('vod detail redesign', () => {
   })
 
   it('puts the finished badge and the favorite button in one action row', () => {
-    expect(app).toContain('<div class="vod-hero-actions">')
-    expect(app).toMatch(/vod-hero-actions[\s\S]*?vod-hero-remarks/)
-    expect(app).toMatch(/vod-hero-actions[\s\S]*?favorite-toggle/)
-    expect(stylesheet).toMatch(/\.vod-hero-actions\s*\{[^}]*display:\s*flex;/s)
+    expect(app).toContain('<div class="vod-detail-actions">')
+    expect(app).toMatch(/vod-detail-actions[\s\S]*?vod-detail-remarks/)
+    expect(app).toMatch(/vod-detail-actions[\s\S]*?favorite-toggle/)
+    expect(stylesheet).toMatch(/\.vod-detail-actions\s*\{[^}]*display:\s*flex;/s)
   })
 
   it('moves the now-playing line out of the modal header into a status line above the player', () => {
@@ -46,7 +72,7 @@ describe('vod detail redesign', () => {
   })
 
   it('sizes episode buttons so that 第01集 shows in full instead of truncating', () => {
-    expect(stylesheet).toMatch(/\.vod-episodes \.ep-list\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(72px, 1fr\)\);/s)
+    expect(stylesheet).toMatch(/\.vod-detail-episodes \.ep-list\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(72px, 1fr\)\);/s)
     expect(stylesheet).toMatch(/\.ep-list button\s*\{[^}]*font-size:\s*0\.8rem;/s)
   })
 
@@ -54,5 +80,10 @@ describe('vod detail redesign', () => {
     expect(app).toContain('ep-pagination')
     expect(app).toContain('更多类似内容')
     expect(app).toMatch(/vod-similar[\s\S]*?ContentCardList[\s\S]*?:style="'grid'"/)
+  })
+
+  it('keeps the back button as the way out of the full page', () => {
+    expect(app).toContain('<VodDetailHeader @back="backFromVodDetail" />')
+    expect(header).toContain('← 返回')
   })
 })

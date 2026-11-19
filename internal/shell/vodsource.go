@@ -5,11 +5,18 @@
 // TVBox 格式点播配置），UnBox 按需从该地址拉取并解析（走已有的
 // ImportVodSource/TVBox 解析），不用每次改本地文件。两种来源都能用、能切换，
 // 切换时重新拉取一次；启动时只恢复快照、不自动联网（与 RestoreSubscription 一致）。
+//
+// v0.9.16 起 CF 源改成下拉框：选项从点播源目录地址拉取
+// （默认 https://live.ciweihaha.win/vod-sources.json，见 DefaultCfVodDirectoryURL），
+// 目录里有新增的源就自动出现；目录拉不到时用内置默认源顶着，也能手动填地址。
 package shell
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"log"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -22,19 +29,32 @@ const (
 	VodSourceCloudflare = "cloudflare"
 )
 
+// DefaultCfVodDirectoryURL 是点播源目录的默认地址：用户在 Cloudflare 上
+// 维护的源清单（名字 + 地址），下拉框的选项从这里自动拉取。
+// 目录文件还没挂上时拉取会 404，前端用内置默认源顶着、不报错。
+const DefaultCfVodDirectoryURL = "https://live.ciweihaha.win/vod-sources.json"
+
 // 点播源在 store.kv 里的键。
 const (
-	vodSourceKindKey  = "vod.source.kind"
-	vodCFURLKey       = "vod.cf.url"
-	vodLocalRefKey    = "vod.local.ref"
-	vodCFUpdatedAtKey = "vod.cf.updatedAt"
+	vodSourceKindKey     = "vod.source.kind"
+	vodCFURLKey          = "vod.cf.url"
+	vodLocalRefKey       = "vod.local.ref"
+	vodCFUpdatedAtKey    = "vod.cf.updatedAt"
+	vodCFDirectoryURLKey = "vod.cf.dirurl"
 )
+
+// CfVodDirectorySource 是点播源目录里的一项：名字 + 地址。
+type CfVodDirectorySource struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
 
 // VodSourceStatus 是点播源当前状态（供设置页回显）。
 type VodSourceStatus struct {
 	Kind          string // "local" | "cloudflare"
 	LocalRef      string // 上次导入的本地点播源地址
 	CloudflareURL string // 已填的 Cloudflare 点播源地址
+	DirectoryURL  string // 点播源目录地址（下拉框的选项来源）；空表示用默认地址
 	UpdatedAt     int64  // CF 源上次拉取的 Unix 秒；0 表示未拉取过
 	Sites         int    // 当前已加载的点播站点数
 }
@@ -52,6 +72,9 @@ func (s *ShellService) GetVodSourceStatus() VodSourceStatus {
 		if v, ok, err := s.store.GetKV(vodCFURLKey); err == nil && ok {
 			st.CloudflareURL = v
 		}
+		if v, ok, err := s.store.GetKV(vodCFDirectoryURLKey); err == nil && ok {
+			st.DirectoryURL = v
+		}
 		if v, ok, err := s.store.GetKV(vodCFUpdatedAtKey); err == nil && ok {
 			if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil {
 				st.UpdatedAt = n
@@ -62,6 +85,79 @@ func (s *ShellService) GetVodSourceStatus() VodSourceStatus {
 	st.Sites = len(s.vods)
 	s.mu.RUnlock()
 	return st
+}
+
+// GetCfVodDirectoryURL 返回点播源目录地址；没改过时用默认地址。
+func (s *ShellService) GetCfVodDirectoryURL() string {
+	if s.store != nil {
+		if v, ok, err := s.store.GetKV(vodCFDirectoryURLKey); err == nil && ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return DefaultCfVodDirectoryURL
+}
+
+// SetCfVodDirectoryURL 改点播源目录地址：必须是 http(s)，只保存不拉取
+// （拉取在打开设置 / 点刷新目录时做）。
+func (s *ShellService) SetCfVodDirectoryURL(rawURL string) error {
+	rawURL = strings.TrimSpace(rawURL)
+	if !isHTTPURL(rawURL) {
+		return errors.New("点播源目录地址必须是 http(s) 地址")
+	}
+	s.setVodSourceKV(vodCFDirectoryURLKey, rawURL)
+	return nil
+}
+
+// FetchCfVodDirectory 从目录地址拉取点播源清单：接受 {"sources": [...]}
+// 或裸数组；只要带名字和 http(s) 地址的项，去重（按地址），其余丢弃。
+// 目录拉不到（404 / 没网 / 格式不对）时返回错误，前端用内置默认源顶着。
+func (s *ShellService) FetchCfVodDirectory() ([]CfVodDirectorySource, error) {
+	dirURL := s.GetCfVodDirectoryURL()
+	client := s.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Get(dirURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("点播源目录拉取失败：HTTP " + strconv.Itoa(resp.StatusCode))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return parseCfVodDirectory(body)
+}
+
+// parseCfVodDirectory 解析目录 JSON（纯函数，方便单测）。
+func parseCfVodDirectory(body []byte) ([]CfVodDirectorySource, error) {
+	var wrapped struct {
+		Sources []CfVodDirectorySource `json:"sources"`
+	}
+	var list []CfVodDirectorySource
+	if err := json.Unmarshal(body, &wrapped); err == nil && wrapped.Sources != nil {
+		list = wrapped.Sources
+	} else if err := json.Unmarshal(body, &list); err != nil {
+		return nil, errors.New("点播源目录格式不对")
+	}
+	seen := make(map[string]struct{})
+	out := make([]CfVodDirectorySource, 0, len(list))
+	for _, src := range list {
+		src.Name = strings.TrimSpace(src.Name)
+		src.URL = strings.TrimSpace(src.URL)
+		if src.Name == "" || !isHTTPURL(src.URL) {
+			continue
+		}
+		if _, dup := seen[src.URL]; dup {
+			continue
+		}
+		seen[src.URL] = struct{}{}
+		out = append(out, src)
+	}
+	return out, nil
 }
 
 // SetCloudflareVodURL 填入 Cloudflare 点播源地址并立即拉取一次：

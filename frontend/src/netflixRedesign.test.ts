@@ -107,11 +107,13 @@ describe('poster row contract', () => {
 })
 
 describe('detail modal contract', () => {
-  it('opens the vod detail as a modal overlay, not an inline page', () => {
-    expect(app).toContain('vod-detail-overlay')
-    expect(app).toContain('vod-detail-modal')
-    expect(stylesheet).toMatch(/\.vod-detail-overlay\s*\{[^}]*position:\s*fixed;/s)
-    expect(stylesheet).toMatch(/\.vod-detail-modal\s*\{[^}]*background:\s*#181818;/s)
+  // v0.9.16 重做：详情不再是浮层，改成独立整页（见 vodDetailRedesign.test.ts）。
+  it('opens the vod detail as a full page, not a floating layer', () => {
+    expect(app).toContain('vod-detail-page')
+    expect(app).not.toContain('vod-detail-overlay')
+    expect(app).not.toContain('vod-detail-modal')
+    expect(stylesheet).toMatch(/\.vod-detail-page\s*\{[^}]*position:\s*fixed;/s)
+    expect(stylesheet).toMatch(/\.vod-detail-page\s*\{[^}]*background:\s*var\(--bg\);/s)
   })
 
   it('shows more-like content from the same real list', () => {
@@ -173,8 +175,11 @@ describe('poster fallback contract', () => {
     expect(cardList).toMatch(/item\.logo && !failedLogos\.has\(item\.key\)/)
   })
 
-  it('gives the detail backdrop a gradient fallback with the same blurred fill', () => {
-    expect(app).toContain('vod-hero-bg-fallback')
-    expect(stylesheet).toMatch(/\.vod-hero-bg-fallback\s*\{[^}]*filter:\s*blur\(24px\)/s)
+  // v0.9.16：Hero 模糊背景随整页重做删掉了；海报加载失败时右上角信息区
+  // 的竖版海报位仍给渐变封面（首字 + posterGradient），不是空盒子。
+  it('gives the detail poster a gradient fallback when its url fails to load', () => {
+    expect(app).toContain('vod-detail-poster')
+    expect(app).toMatch(/vodDetail\.Logo && !detailLogoFailed/)
+    expect(app).toMatch(/posterGradient\(vodDetail\.Title\)/)
   })
 })

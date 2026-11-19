@@ -4,9 +4,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import {
   createLiveSubtitleSettings,
+  liveSubtitleStatusText,
   normalizeLiveSubtitleSettings,
   type LiveSubtitleSettings,
   type LiveSubtitleSettingsApi,
+  type LiveSubtitleStatus,
 } from './liveSubtitleSettings'
 
 describe('启动加载', () => {
@@ -94,5 +96,49 @@ describe('createLiveSubtitleSettings', () => {
     const store = createLiveSubtitleSettings(api, onError)
     expect(await store.status()).toBeNull()
     expect(onError).toHaveBeenCalled()
+  })
+})
+
+describe('liveSubtitleStatusText', () => {
+  const base: LiveSubtitleStatus = {
+    Running: false,
+    Enabled: true,
+    WhisperModel: 'tiny.en',
+    WindowSeconds: 1.5,
+    WindowsProcessed: 0,
+    WindowsDropped: 0,
+    LastLatencyMs: 0,
+    AvgLatencyMs: 0,
+    LastSubtitle: '',
+    Error: '',
+  }
+
+  it('运行中报延迟', () => {
+    expect(liveSubtitleStatusText({ ...base, Running: true, LastLatencyMs: 2300 })).toBe(
+      '直播字幕运行中，最近延迟约 2.3 秒',
+    )
+  })
+
+  it('有错误报异常原因', () => {
+    expect(liveSubtitleStatusText({ ...base, Error: '模型下载失败' })).toBe('直播字幕异常：模型下载失败')
+  })
+
+  it('开关关着时说清楚是已关闭、不是故障', () => {
+    const text = liveSubtitleStatusText({ ...base, Enabled: false })
+    expect(text).toContain('已关闭')
+    expect(text).not.toContain('未启动')
+  })
+
+  it('开着但没在播时说清楚是待机、什么时候才启动', () => {
+    // 引擎只在播英文直播（网页播放）时才启动：设置页里没在播，
+    // “开着却未启动”是正常待机，必须写明原因，不能只说“未启动”。
+    const text = liveSubtitleStatusText(base)
+    expect(text).toContain('尚未启动')
+    expect(text).toContain('播英文直播')
+    expect(text).not.toBe('直播字幕未启动')
+  })
+
+  it('状态查不到时明说查不到', () => {
+    expect(liveSubtitleStatusText(null)).toContain('查不到')
   })
 })

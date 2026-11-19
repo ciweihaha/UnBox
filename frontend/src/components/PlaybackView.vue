@@ -39,6 +39,8 @@ const props = defineProps<{
   liveSubtitleEnabled?: boolean
   /** 直播音频推送入口（App 注入，对应后端 PushLiveAudioChunk）；不传不抓音频。 */
   liveAudioPusher?: LiveAudioPusher
+  /** mpv 后端是否暂停：mpv 没有 <video> 元素，暂停状态由 App 经 ShellService 维护。 */
+  mpvPaused?: boolean
 }>()
 const emit = defineEmits<{
   fallback: [id: string, position: number]
@@ -48,6 +50,8 @@ const emit = defineEmits<{
   markOutro: [position: number]
   resetIntro: []
   resetOutro: []
+  /** mpv 后端：上层经 ShellService Pause/Resume 暂停或继续。 */
+  togglePause: []
 }>()
 const video = ref<HTMLVideoElement | null>(null)
 const trackState = ref<TrackState | null>(null)
@@ -66,6 +70,12 @@ const liveCaptureError = ref('')
 const rotation = ref(0)
 // 自绘播放控件状态：原生 controls 会跟着画面一起旋转，且全屏时无法与工具按钮共存。
 const playing = ref(false)
+// hasStarted：本集至少播起来过一次——没播过时暂停提示没有意义。
+const hasStarted = ref(false)
+// 暂停提示：web 看 video 元素（播起来过 + 当前暂停）；mpv 看 App 维护的 mpvPaused。
+const showPauseBadge = computed(
+  () => (props.plan?.Backend === 'mpv' ? !!props.mpvPaused : hasStarted.value && !playing.value),
+)
 const currentTime = ref(0)
 const duration = ref(0)
 const muted = ref(false)
@@ -345,6 +355,7 @@ function scheduleHideControls(): void {
 
 function onPlay(): void {
   playing.value = true
+  hasStarted.value = true
   seeking.value = false
   emit('playback', 'playing')
   scheduleHideControls()
@@ -365,6 +376,11 @@ function onVolumeChange(): void {
 }
 
 function togglePlay(): void {
+  // mpv 没有 <video> 元素：交给上层走已有的 ShellService Pause/Resume。
+  if (props.plan?.Backend === 'mpv') {
+    emit('togglePause')
+    return
+  }
   const element = video.value
   if (!element) return
   if (element.paused) {
@@ -496,7 +512,8 @@ function onKeydown(event: KeyboardEvent): void {
   const element = video.value
   if (!element) return
   switch (event.key) {
-    case ' ':
+    // 空格不走这里：App 有全局监听，播点播和直播时都接管空格暂停/继续；
+    // 这里再处理一次会跟全局监听重复，按一次变两次。
     case 'k':
       event.preventDefault()
       togglePlay()
@@ -640,6 +657,7 @@ function onDocumentClick(event: MouseEvent) {
 }
 
 async function attach(plan: PlaybackPlan | null) {
+  hasStarted.value = false
   cleanup()
   const generation = attachGeneration
   fallbackSent = false
@@ -700,6 +718,8 @@ watch(menuOpen, (open) => {
   }
   scheduleHideControls()
 })
+defineExpose({ togglePlay })
+
 onMounted(() => {
   detectPictureInPicture()
   document.addEventListener('click', onDocumentClick)
@@ -801,6 +821,7 @@ onBeforeUnmount(() => {
       :subtitle-tracks="trackState.subtitleTracks" :current-subtitle="trackState.currentSubtitle"
       :select-level="trackState.selectLevel" :select-audio="trackState.selectAudio"
       :select-subtitle="onSelectSubtitle" />
+    <div v-if="showPauseBadge" class="pause-badge" role="status">已暂停</div>
     <div v-if="plan?.Backend === 'mpv'" class="mpv-status">正在使用 mpv 播放</div>
     <div v-else-if="!plan" class="playback-empty">{{ emptyText || '选择频道或剧集开始播放' }}</div>
   </div>

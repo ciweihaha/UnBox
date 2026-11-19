@@ -19,3 +19,67 @@ export function isValidCfVodURL(url: string): boolean {
     return false
   }
 }
+
+/** CfVodDirectorySource 是点播源目录里的一项：名字 + 地址。 */
+export interface CfVodDirectorySource {
+  name: string
+  url: string
+}
+
+/** 默认点播源目录地址：用户在 Cloudflare 上维护的源清单。 */
+export const DEFAULT_CF_VOD_DIRECTORY_URL = 'https://live.ciweihaha.win/vod-sources.json'
+
+/**
+ * 目录拉不到时（没网、地址不对、文件还没挂上）的内置源：
+ * 就是目录文件里会列的那几个，先顶着用。
+ */
+export const DEFAULT_CF_VOD_SOURCES: CfVodDirectorySource[] = [
+  { name: '聚合万能源', url: 'https://live.ciweihaha.win/vod.json' },
+  { name: '聚合·37站', url: 'https://ysp.ciweihaha.win/agg' },
+  { name: '亚洲点播', url: 'https://ysp.ciweihaha.win/oktv-asia.json' },
+]
+
+/** 下拉框里“手动输入”那一项的值（不是真实地址）。 */
+export const CF_VOD_SOURCE_MANUAL = '__manual__'
+
+/**
+ * parseCfVodDirectory 解析点播源目录 JSON：接受 `{ sources: [...] }`
+ * 或裸数组；只要带名字和 http(s) 地址的项，去重（按地址），其余丢弃。
+ */
+export function parseCfVodDirectory(value: unknown): CfVodDirectorySource[] {
+  const list = Array.isArray(value)
+    ? value
+    : (typeof value === 'object' && value !== null && Array.isArray((value as { sources?: unknown }).sources)
+      ? (value as { sources: unknown[] }).sources
+      : undefined)
+  if (!Array.isArray(list)) return []
+  const seen = new Set<string>()
+  const out: CfVodDirectorySource[] = []
+  for (const item of list) {
+    if (typeof item !== 'object' || item === null) continue
+    const { name, url } = item as { name?: unknown; url?: unknown }
+    const cleanName = typeof name === 'string' ? name.trim() : ''
+    const cleanUrl = typeof url === 'string' ? url.trim() : ''
+    if (!cleanName || !isValidCfVodURL(cleanUrl) || seen.has(cleanUrl)) continue
+    seen.add(cleanUrl)
+    out.push({ name: cleanName, url: cleanUrl })
+  }
+  return out
+}
+
+/**
+ * resolveCfVodSources 合并目录源与当前正在用的地址：目录里的优先；
+ * 当前地址不在目录里时追加一项“当前地址”，免得下拉框选不中正在用的源；
+ * 目录和当前地址都没有时用内置默认源。
+ */
+export function resolveCfVodSources(
+  dir: CfVodDirectorySource[],
+  currentUrl: string,
+): CfVodDirectorySource[] {
+  const merged = [...dir]
+  const url = currentUrl.trim()
+  if (url && isValidCfVodURL(url) && !merged.some((s) => s.url === url)) {
+    merged.push({ name: '当前地址', url })
+  }
+  return merged.length ? merged : [...DEFAULT_CF_VOD_SOURCES]
+}

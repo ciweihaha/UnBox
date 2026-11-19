@@ -20,10 +20,19 @@ func newVodConfigServer(t *testing.T) *httptest.Server {
 	}))
 }
 
+// newVodBodyServer 返回固定 body 的测试服务器（目录 JSON 用，不走 TVBox 配置）。
+func newVodBodyServer(t *testing.T, body string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+}
+
 func TestVodSourceStatusDefaults(t *testing.T) {
 	svc := newTestService(t)
 	st := svc.GetVodSourceStatus()
-	if st.Kind != VodSourceLocal || st.LocalRef != "" || st.CloudflareURL != "" || st.UpdatedAt != 0 || st.Sites != 0 {
+	if st.Kind != VodSourceLocal || st.LocalRef != "" || st.CloudflareURL != "" || st.DirectoryURL != "" || st.UpdatedAt != 0 || st.Sites != 0 {
 		t.Fatalf("默认状态 = %+v，想要 local/空/0", st)
 	}
 }
@@ -134,5 +143,76 @@ func TestDeleteSourceClearsCloudflareURL(t *testing.T) {
 	st := svc.GetVodSourceStatus()
 	if st.CloudflareURL != "" || st.Kind != VodSourceLocal {
 		t.Fatalf("删 CF 源后状态 = %+v，想要地址清空、回到 local", st)
+	}
+}
+
+func TestCfVodDirectoryURLDefaultAndRoundTrip(t *testing.T) {
+	svc := newTestService(t)
+
+	if got := svc.GetCfVodDirectoryURL(); got != DefaultCfVodDirectoryURL {
+		t.Fatalf("未设置时 = %q, want 默认目录地址 %q", got, DefaultCfVodDirectoryURL)
+	}
+	dir := "https://example.com/my-sources.json"
+	if err := svc.SetCfVodDirectoryURL(dir); err != nil {
+		t.Fatalf("SetCfVodDirectoryURL: %v", err)
+	}
+	if got := svc.GetCfVodDirectoryURL(); got != dir {
+		t.Fatalf("设置后 = %q, want %q", got, dir)
+	}
+}
+
+func TestSetCfVodDirectoryURLRejectsNonHTTP(t *testing.T) {
+	svc := newTestService(t)
+	if err := svc.SetCfVodDirectoryURL("ftp://example.com/x.json"); err == nil {
+		t.Fatal("非 http(s) 目录地址应该被拒绝")
+	}
+	if err := svc.SetCfVodDirectoryURL(""); err == nil {
+		t.Fatal("空目录地址应该被拒绝")
+	}
+}
+
+func TestFetchCfVodDirectory(t *testing.T) {
+	dir := newVodBodyServer(t, `{"sources":[
+		{"name":"聚合万能源","url":"https://live.ciweihaha.win/vod.json"},
+		{"name":"聚合·37站","url":"https://ysp.ciweihaha.win/agg"},
+		{"name":"","url":"https://bad.example/x.json"},
+		{"name":"坏地址","url":"ftp://bad.example/x.json"}
+	]}`)
+	svc := newTestService(t)
+	if err := svc.SetCfVodDirectoryURL(dir.URL + "/sources.json"); err != nil {
+		t.Fatalf("SetCfVodDirectoryURL: %v", err)
+	}
+	got, err := svc.FetchCfVodDirectory()
+	if err != nil {
+		t.Fatalf("FetchCfVodDirectory: %v", err)
+	}
+	if len(got) != 2 || got[0].Name != "聚合万能源" || got[1].URL != "https://ysp.ciweihaha.win/agg" {
+		t.Fatalf("拉取结果 = %#v, want 前两项有效源", got)
+	}
+}
+
+func TestFetchCfVodDirectoryAcceptsBareArray(t *testing.T) {
+	dir := newVodBodyServer(t, `[{"name":"甲","url":"https://a.example/vod.json"}]`)
+	svc := newTestService(t)
+	if err := svc.SetCfVodDirectoryURL(dir.URL + "/sources.json"); err != nil {
+		t.Fatalf("SetCfVodDirectoryURL: %v", err)
+	}
+	got, err := svc.FetchCfVodDirectory()
+	if err != nil {
+		t.Fatalf("FetchCfVodDirectory: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "甲" {
+		t.Fatalf("裸数组结果 = %#v, want 1 项", got)
+	}
+}
+
+func TestFetchCfVodDirectoryErrors(t *testing.T) {
+	svc := newTestService(t)
+	bad := newVodBodyServer(t, `not json`)
+	if err := svc.SetCfVodDirectoryURL(bad.URL + "/sources.json"); err != nil {
+		t.Fatalf("SetCfVodDirectoryURL: %v", err)
+	}
+	if _, err := svc.FetchCfVodDirectory(); err == nil {
+		t.Fatal("非法 JSON 应该返回错误，不能静默当成空目录")
 	}
 }

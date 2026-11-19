@@ -662,3 +662,73 @@ describe('刷新与音量控件（2026-10-22）', () => {
     expect(cap.stop).toHaveBeenCalled()
   })
 })
+
+describe('空格暂停 / 暂停提示', () => {
+  it('togglePlay 通过 defineExpose 暴露给上层（全局空格键调用它）', async () => {
+    const wrapper = await mountView()
+    expect(typeof (wrapper.vm as unknown as { togglePlay: unknown }).togglePlay).toBe('function')
+  })
+
+  it('播放中按暂停后显示暂停提示，继续后提示消失', async () => {
+    const wrapper = await mountView()
+    const video = wrapper.find('video')
+    expect(wrapper.find('.pause-badge').exists()).toBe(false)
+
+    await video.trigger('playing')
+    await nextTick()
+    expect(wrapper.find('.pause-badge').exists()).toBe(false)
+
+    await video.trigger('pause')
+    await nextTick()
+    expect(wrapper.find('.pause-badge').exists()).toBe(true)
+    expect(wrapper.find('.pause-badge').text()).toContain('已暂停')
+
+    await video.trigger('playing')
+    await nextTick()
+    expect(wrapper.find('.pause-badge').exists()).toBe(false)
+  })
+
+  it('还没开始播时不显示暂停提示', async () => {
+    const wrapper = await mountView()
+    expect(wrapper.find('.pause-badge').exists()).toBe(false)
+  })
+
+  it('mpv 后端按 mpvPaused 显示暂停提示', async () => {
+    const paused = await mountView({ Backend: 'mpv', URL: '' }, { mpvPaused: true })
+    expect(paused.find('.pause-badge').exists()).toBe(true)
+    expect(paused.find('.pause-badge').text()).toContain('已暂停')
+
+    const playing = await mountView({ Backend: 'mpv', URL: '' }, { mpvPaused: false })
+    expect(playing.find('.pause-badge').exists()).toBe(false)
+  })
+
+  it('mpv 后端按 togglePlay 发 toggle-pause（上层走 ShellService Pause/Resume）', async () => {
+    const wrapper = await mountView({ Backend: 'mpv', URL: '' })
+    ;(wrapper.vm as unknown as { togglePlay: () => void }).togglePlay()
+    expect(wrapper.emitted('togglePause')).toBeTruthy()
+  })
+
+  it('播放器容器不再自己处理空格（全局监听接管，避免按一次变两次）', async () => {
+    const wrapper = await mountView()
+    const video = wrapper.find('video').element as HTMLVideoElement
+    const pause = vi.fn()
+    video.pause = pause as unknown as HTMLVideoElement['pause']
+    Object.defineProperty(video, 'paused', { configurable: true, get: () => false })
+
+    await wrapper.find('video').trigger('playing')
+    await wrapper.find('.playback-view').trigger('keydown', { key: ' ' })
+    expect(pause).not.toHaveBeenCalled()
+  })
+
+  it('播放器容器仍保留 k 键暂停（不影响原有快捷键）', async () => {
+    const wrapper = await mountView()
+    const video = wrapper.find('video').element as HTMLVideoElement
+    const pause = vi.fn()
+    video.pause = pause as unknown as HTMLVideoElement['pause']
+    Object.defineProperty(video, 'paused', { configurable: true, get: () => false })
+
+    await wrapper.find('video').trigger('playing')
+    await wrapper.find('.playback-view').trigger('keydown', { key: 'k' })
+    expect(pause).toHaveBeenCalled()
+  })
+})

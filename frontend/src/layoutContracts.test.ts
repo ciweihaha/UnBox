@@ -35,6 +35,15 @@ describe('vod layout contract', () => {
     expect(stylesheet).not.toContain('--vod-rail')
     expect(stylesheet).toMatch(/\.vod-layout\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;/s)
     expect(stylesheet).not.toMatch(/\.vod-layout\s*\{[^}]*grid-template-columns:/s)
+
+    // 2026-11-19 回归：列表滚不动——.vod-layout 只是普通块、.vod-main
+    // 高度由内容撑开，ul 永远拿不到受限高度，overflow-y: auto 触发不了，
+    // 60 条卡片全堆在视口外、底部够不着。.vod-layout 改成纵向 flex、
+    // .vod-main 占满剩余高度，ul 才有可滚动的高度。
+    expect(stylesheet).toMatch(/\.vod-layout\s*\{[^}]*display:\s*flex;/s)
+    expect(stylesheet).toMatch(/\.vod-layout\s*\{[^}]*flex-direction:\s*column;/s)
+    expect(stylesheet).toMatch(/\.vod-main\s*\{[^}]*flex:\s*1;/s)
+    expect(stylesheet).toMatch(/\.vod-main\s*\{[^}]*min-height:\s*0;/s)
   })
 
   it('keeps a single vod item at the configured card width', () => {
@@ -272,5 +281,98 @@ describe('停止播放不阻塞页面切换契约', () => {
     const stopFn = app.match(/async function stopPlayback[\s\S]*?\n\}/)
     expect(stopFn).not.toBeNull()
     expect(stopFn![0]).not.toContain('await ShellService.StopPlayback')
+  })
+})
+
+describe('设置弹窗契约', () => {
+  // 2026-11-19 回归：「关于我们」面板直接叠在设置页上面、跟后面的
+  // 设置内容挤成一团——.settings-overlay/.settings-panel 根本没有基础
+  // 样式，div 按普通块排在文档流里。约定：遮罩 fixed 盖满全屏、半透明
+  // 底、面板居中；所有用这两个类的弹窗（关于/免责/删除确认/主题选择）
+  // 都吃同一套。
+  it('遮罩盖满全屏、面板居中，不再是文档流里的普通块', () => {
+    expect(stylesheet).toMatch(/\.settings-overlay\s*\{[^}]*position:\s*fixed;/s)
+    expect(stylesheet).toMatch(/\.settings-overlay\s*\{[^}]*inset:\s*0;/s)
+    expect(stylesheet).toMatch(/\.settings-overlay\s*\{[^}]*display:\s*flex;/s)
+    expect(stylesheet).toMatch(/\.settings-overlay\s*\{[^}]*align-items:\s*center;/s)
+    expect(stylesheet).toMatch(/\.settings-overlay\s*\{[^}]*justify-content:\s*center;/s)
+    expect(stylesheet).toMatch(/\.settings-overlay\s*\{[^}]*z-index:\s*100;/s)
+    // 遮罩要能挡住后面的设置内容（半透明深色底），不是透明。
+    expect(stylesheet).toMatch(/\.settings-overlay\s*\{[^}]*background:\s*rgba\(0,\s*0,\s*0,\s*0\.[5-9]/s)
+    expect(stylesheet).toMatch(/\.settings-panel\s*\{[^}]*max-width:/s)
+    expect(stylesheet).toMatch(/\.settings-panel\s*\{[^}]*background:\s*var\(--panel\);/s)
+    expect(app).toContain('v-if="showAbout" class="settings-overlay"')
+  })
+})
+
+describe('错误提示自动消失契约', () => {
+  // 2026-11-19 回归：检测接口失败后底部红条一直挂着，非得手动点 X。
+  // 约定：底部错误条与成功提示 5 秒自动消失；带操作按钮的证书错误不自动清。
+  it('错误条与成功提示走自动清空，证书豁免除外', () => {
+    expect(app).toContain("import { autoClearMessage } from './ephemeralMessage'")
+    expect(app).toMatch(/autoClearMessage\(errMsg/)
+    expect(app).toMatch(/autoClearMessage\(translateModelMsg/)
+    // 证书错误带一键豁免按钮：skip 掉自动清，等用户自己处理。
+    expect(app).toMatch(/autoClearMessage\(errMsg[\s\S]*?certExemptHost/)
+  })
+})
+
+describe('空格键暂停契约', () => {
+  // 2026-11-19：播点播和直播时按空格暂停、再按继续；焦点在输入框时不触发；
+  // 暂停时画面定住并显示暂停提示。播放器自己的 keydown 只在获焦时生效，
+  // 所以空格由 App 的全局监听接管（播放器内不再处理空格，避免按一次变两次）。
+  it('App 全局监听空格，输入框内不触发，只在有播放计划时暂停', () => {
+    expect(app).toContain("document.addEventListener('keydown', handleGlobalSpaceKey)")
+    expect(app).toContain("document.removeEventListener('keydown', handleGlobalSpaceKey)")
+    expect(app).toMatch(/function handleGlobalSpaceKey[\s\S]*?tagName === 'INPUT'/)
+    expect(app).toMatch(/function handleGlobalSpaceKey[\s\S]*?tagName === 'TEXTAREA'/)
+    expect(app).toMatch(/function handleGlobalSpaceKey[\s\S]*?isContentEditable/)
+    expect(app).toMatch(/function handleGlobalSpaceKey[\s\S]*?vodPagePlaybackPlan\.value/)
+    expect(app).toMatch(/function handleGlobalSpaceKey[\s\S]*?livePagePlaybackPlan\.value/)
+    expect(app).toMatch(/function handleGlobalSpaceKey[\s\S]*?togglePlay\(\)/)
+    // 播放器容器不再自己处理空格（否则全局监听会让它按一次变两次）。
+    const playbackView = readFileSync('src/components/PlaybackView.vue', 'utf8')
+    const onKeydown = playbackView.match(/function onKeydown[\s\S]*?\n\}/)?.[0] ?? ''
+    expect(onKeydown).not.toContain("case ' ':")
+  })
+
+  it('mpv 后端走已有的 ShellService Pause/Resume，不另起一套', () => {
+    expect(app).toMatch(/ShellService\.Pause\(\)/)
+    expect(app).toMatch(/ShellService\.Resume\(\)/)
+  })
+
+  it('暂停时播放器里显示暂停提示', () => {
+    const playbackView = readFileSync('src/components/PlaybackView.vue', 'utf8')
+    expect(playbackView).toContain('pause-badge')
+    expect(playbackView).toContain('已暂停')
+  })
+})
+
+describe('Cloudflare 点播源下拉框契约', () => {
+  // 2026-11-19：设置里 Cloudflare 点播源改成下拉框，选项从目录地址自动拉取；
+  // 目录拉不到时用内置默认源，并允许手动填地址；目录地址本身能在设置里改。
+  it('设置里是下拉框，不是单个地址输入框', () => {
+    expect(app).toContain('cfVodSourceChoice')
+    expect(app).toMatch(/ThemedSelect[\s\S]*?cfVodSourceOptions/)
+    expect(app).not.toMatch(/Cloudflare 点播源 <input/)
+  })
+
+  it('目录地址默认 live.ciweihaha.win/vod-sources.json，可改、可刷新', () => {
+    expect(app).toContain('cfVodDirectoryUrl')
+    expect(app).toMatch(/cfVodDirectoryUrl[\s\S]*?DEFAULT_CF_VOD_DIRECTORY_URL/)
+    expect(app).toContain('refreshCfVodDirectory')
+    expect(app).toContain('saveCfVodDirectoryUrl')
+    expect(app).toMatch(/ShellService\.SetCfVodDirectoryURL\(/)
+    expect(app).toMatch(/ShellService\.FetchCfVodDirectory\(\)/)
+  })
+
+  it('目录拉不到时不报错、用默认源兜底，并允许手动填地址', () => {
+    expect(app).toMatch(/resolveCfVodSources\(cfVodDirectorySources\.value, cfVodUrl\.value\)/)
+    expect(app).toContain('CF_VOD_SOURCE_MANUAL')
+    expect(app).toMatch(/cfVodSourceChoice === CF_VOD_SOURCE_MANUAL/)
+  })
+
+  it('选了下拉框的源就保存并拉取', () => {
+    expect(app).toMatch(/function onCfVodSourceSelect[\s\S]*?saveCfVodUrl\(\)/)
   })
 })

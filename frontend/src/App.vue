@@ -15,7 +15,7 @@ import { imgError, scrollxEnter, scrollxLeave } from './contentListDom'
 import { createPlaybackSettings, PLAYBACK_SETTING_ITEMS, type PlaybackSettingKey, type PlaybackSettingsApi } from './playbackSettings'
 import { createSubtitleTranslator, type TranslateSubtitleApi } from './subtitleTranslate'
 import { createTranslateSettings, type FreeTranslateProvider, type TranslateProvider, type TranslateSettingsApi } from './translateSettings'
-import { createLiveSubtitleSettings, type LiveSubtitleSettingsApi } from './liveSubtitleSettings'
+import { createLiveSubtitleSettings, liveSubtitleStatusText, type LiveSubtitleSettingsApi } from './liveSubtitleSettings'
 import { VodAutomation, nextEpisodeInSource, sameNameEpisodeOnSource, type VodAutomationHost } from './playbackAutomation'
 import { resolveSkipAction, type SkipRuntime, type VodSkipMarks } from './vodSkip'
 import { initializeHomeState } from './startup'
@@ -27,7 +27,8 @@ import { countLeadingStrong, sortVodSearchResults } from './vodSearchRelevance'
 import { appliedFilter, availableFilterGroups, hasActiveFilter, initialSelections } from './vodFilters'
 import { certErrorHost } from './tlsExempt'
 import { TOP_NAV_CATEGORIES, topNavKeyForCategory, type TopNavCategory } from './topNav'
-import { isValidCfVodURL, vodSourceKindLabel } from './vodSource'
+import { CF_VOD_SOURCE_MANUAL, DEFAULT_CF_VOD_DIRECTORY_URL, parseCfVodDirectory, resolveCfVodSources, isValidCfVodURL, vodSourceKindLabel, type CfVodDirectorySource } from './vodSource'
+import { autoClearMessage } from './ephemeralMessage'
 import DOMPurify from 'dompurify'
 
 
@@ -168,6 +169,10 @@ const deadCertExemptHost = computed(() => {
   return host && !insecureTLSHosts.value.includes(host) ? host : ''
 })
 
+// 底部错误条与成功提示 5 秒自动消失，不用用户手动点 X。
+// 带一键豁免按钮的证书错误不自动清：用户还没点按钮就消失，等于把修复入口藏起来了。
+autoClearMessage(errMsg, 5000, () => certExemptHost.value !== '')
+
 // exemptCertHost 记住是哪台主机就把哪台加进豁免名单，然后重跑刚才失败的操作。
 async function exemptCertHost(host: string) {
   if (!host) return
@@ -264,6 +269,8 @@ const translateCFToken = computed({
   set: (v: string) => { void translateSettingsStore.setCFToken(v) },
 })
 const translateModelMsg = ref('')
+// 成功提示也 5 秒自动消失（和底部错误条同一套）。
+autoClearMessage(translateModelMsg)
 async function checkTranslateModel() {
   const ok = await translateSettingsStore.checkModel()
   translateModelMsg.value = ok ? '免费接口就绪，可以开字幕翻译' : ''
@@ -288,11 +295,9 @@ function toggleLiveSubtitleSetting(value: boolean) {
 async function refreshLiveSubtitleStatus() {
   const st = await liveSubtitleSettingsStore.status()
   if (!st) return
-  liveSubtitleStatusMsg.value = st.Running
-    ? `直播字幕运行中，最近延迟约 ${(st.LastLatencyMs / 1000).toFixed(1)} 秒`
-    : st.Error
-      ? `直播字幕异常：${st.Error}`
-      : '直播字幕未启动'
+  // 开关只表示“已启用”：引擎只在播英文直播（网页播放）时才启动，
+  // 设置页里没在播，“开着却未启动”是正常待机——文案必须写明原因。
+  liveSubtitleStatusMsg.value = liveSubtitleStatusText(st)
 }
 
 const cardContextMenu = ref<{
@@ -316,8 +321,47 @@ const activePlaybackPlan = computed(() => playbackPlanForMode(mode.value, {
   live: livePlaybackPlan.value,
   vod: vodPlaybackPlan.value,
 }, playbackOwner.value ?? undefined))
+// 空格键暂停/继续：mpv 没有 <video> 元素，暂停状态由这里维护，
+// 经已有的 ShellService Pause/Resume 走 mpv 自己的播放控制。
+const mpvPaused = ref(false)
+const vodPlayerRef = ref<InstanceType<typeof PlaybackView> | null>(null)
+const livePlayerRef = ref<InstanceType<typeof PlaybackView> | null>(null)
+
+async function toggleMpvPause() {
+  try {
+    if (mpvPaused.value) {
+      await ShellService.Resume()
+      mpvPaused.value = false
+    } else {
+      await ShellService.Pause()
+      mpvPaused.value = true
+    }
+  } catch (e) { handleError(e) }
+}
+
+// 全局空格键：播点播和直播时都接管（播放器只在获焦时收到按键，
+// 覆盖不了整个窗口）；焦点在输入框/可编辑区时不触发，别跟打字冲突；
+// 弹窗（点播源失效）开着时也不触发。
+function handleGlobalSpaceKey(event: KeyboardEvent) {
+  if (event.key !== ' ' || vodSourceDead.value) return
+  const target = event.target as HTMLElement | null
+  const tagName = target?.tagName
+  if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || target?.isContentEditable) return
+  if (mode.value === 'vod' && vodPagePlaybackPlan.value) {
+    event.preventDefault()
+    vodPlayerRef.value?.togglePlay()
+    return
+  }
+  if (mode.value === 'live' && livePagePlaybackPlan.value) {
+    event.preventDefault()
+    livePlayerRef.value?.togglePlay()
+  }
+}
+
 const livePagePlaybackPlan = computed(() => mode.value === 'live' && playbackOwner.value === 'live' ? livePlaybackPlan.value : null)
 const vodPagePlaybackPlan = computed(() => mode.value === 'vod' && vodView.value === 'detail' && playbackOwner.value === 'vod' ? vodPlaybackPlan.value : null)
+// 切了片子/频道，暂停状态跟着新计划走，不留旧的。
+watch([vodPagePlaybackPlan, livePagePlaybackPlan], () => { mpvPaused.value = false })
 const showVodNoResults = computed(() => shouldShowVodNoResults(vodQuery.value, completedSearchQuery.value, searching.value, vodSearchItems.value.length))
 
 function resetEpisodePage() {
@@ -882,12 +926,61 @@ async function reloadSourceHistory() {
 // RefreshCloudflareVodSource、UseLocalVodSource、GetVodSourceStatus。
 const vodSourceStatus = ref<VodSourceStatus | null>(null)
 const cfVodUrl = ref('')
+// 点播源目录：下拉框的选项从这里自动拉取（默认地址见 vodSource.ts）；
+// 目录拉不到（文件还没挂上 / 没网）时用内置默认源顶着，不报错。
+const cfVodDirectoryUrl = ref(DEFAULT_CF_VOD_DIRECTORY_URL)
+const cfVodDirectorySources = ref<CfVodDirectorySource[]>([])
+const cfVodDirectoryMsg = ref('')
+const cfVodSourceChoice = ref('')
+// 下拉框选项：目录里的源 + “手动输入…”；resolveCfVodSources 保证
+// 正在用的地址（哪怕不在目录里）也在列表里，免得选不中当前源。
+const cfVodSources = computed(() => resolveCfVodSources(cfVodDirectorySources.value, cfVodUrl.value))
+const cfVodSourceOptions = computed(() => [
+  ...cfVodSources.value.map((src) => ({ name: src.name, value: src.url })),
+  { name: '手动输入…', value: CF_VOD_SOURCE_MANUAL },
+])
+
+function syncCfVodSourceChoice() {
+  const url = cfVodUrl.value.trim()
+  cfVodSourceChoice.value = cfVodSources.value.some((src) => src.url === url) ? url : CF_VOD_SOURCE_MANUAL
+}
+
+async function refreshCfVodDirectory() {
+  try {
+    cfVodDirectorySources.value = parseCfVodDirectory(await ShellService.FetchCfVodDirectory())
+    cfVodDirectoryMsg.value = ''
+  } catch {
+    // 目录拉不到不报错：内置默认源顶着，用户还能手动填地址。
+    cfVodDirectorySources.value = []
+    cfVodDirectoryMsg.value = '点播源目录暂时拉不到，先用内置的几个源'
+  }
+  syncCfVodSourceChoice()
+}
+
+async function saveCfVodDirectoryUrl() {
+  const url = cfVodDirectoryUrl.value.trim()
+  if (!isValidCfVodURL(url) || importing.value) return
+  try {
+    await ShellService.SetCfVodDirectoryURL(url)
+    await refreshCfVodDirectory()
+  } catch (e) { handleError(e) }
+}
+
+async function onCfVodSourceSelect(value: string) {
+  cfVodSourceChoice.value = value
+  if (value === CF_VOD_SOURCE_MANUAL) return
+  cfVodUrl.value = value
+  await saveCfVodUrl()
+}
 
 async function loadVodSourceStatus() {
   try {
     vodSourceStatus.value = await ShellService.GetVodSourceStatus()
     if (vodSourceStatus.value?.CloudflareURL) cfVodUrl.value = vodSourceStatus.value.CloudflareURL
+    if (vodSourceStatus.value?.DirectoryURL) cfVodDirectoryUrl.value = vodSourceStatus.value.DirectoryURL
   } catch (e) { handleError(e) }
+  // 打开设置或拉完源都顺手刷一下目录：有新增的源就自动出现在下拉框里。
+  await refreshCfVodDirectory()
 }
 
 async function saveCfVodUrl() {
@@ -1920,6 +2013,7 @@ onMounted(() => {
   void liveSubtitleSettingsStore.load()
   document.addEventListener('click', closeCardContextMenu)
   document.addEventListener('keydown', handleCardContextMenuKeydown)
+  document.addEventListener('keydown', handleGlobalSpaceKey)
   window.addEventListener('resize', syncSearchHistoryDropdownOnResize)
   Events.On('import:progress', (ev: any) => { importProgress.value = ev.data as Progress })
   Events.On('search:start', (ev: any) => {
@@ -1959,6 +2053,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('click', closeCardContextMenu)
   document.removeEventListener('keydown', handleCardContextMenuKeydown)
+  document.removeEventListener('keydown', handleGlobalSpaceKey)
   window.removeEventListener('resize', syncSearchHistoryDropdownOnResize)
   vodAutomation.stop()
   if (liveToastTimer !== null) clearTimeout(liveToastTimer)
@@ -2156,7 +2251,7 @@ onBeforeUnmount(() => {
       <aside class="player">
         <p v-if="liveNowPlaying" class="now">正在播放：{{ liveNowPlaying }}</p>
         <p v-if="livePlaybackStatus === 'error'" class="playback-error" aria-live="assertive">频道播放失败：{{ livePlaybackError }}</p>
-        <PlaybackView :plan="livePagePlaybackPlan" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" :live-subtitle="liveSubtitleText" :live-subtitle-enabled="liveSubtitleSettings.Enabled" :live-audio-pusher="liveAudioPusher" @fallback="(id, position) => fallbackToMpv('live', id, livePlaybackToken, position)" />
+        <PlaybackView ref="livePlayerRef" :plan="livePagePlaybackPlan" :mpv-paused="mpvPaused" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" :live-subtitle="liveSubtitleText" :live-subtitle-enabled="liveSubtitleSettings.Enabled" :live-audio-pusher="liveAudioPusher" @fallback="(id, position) => fallbackToMpv('live', id, livePlaybackToken, position)" @toggle-pause="toggleMpvPause" />
       </aside>
 
       <section class="channels">
@@ -2257,11 +2352,22 @@ onBeforeUnmount(() => {
           </div>
         </form>
         <div class="src-add">
-          <label>Cloudflare 点播源 <input v-model="cfVodUrl" type="text" placeholder="https://live.ciweihaha.win/vod.json" :disabled="importing" /></label>
-          <button type="button" :disabled="importing || !isValidCfVodURL(cfVodUrl)" @click="saveCfVodUrl">保存并拉取</button>
-          <button type="button" :disabled="importing" @click="refreshCfVodSource">刷新</button>
+          <label>Cloudflare 点播源
+            <ThemedSelect :model-value="cfVodSourceChoice" :options="cfVodSourceOptions" aria-label="Cloudflare 点播源" @update:model-value="onCfVodSourceSelect" />
+          </label>
+          <button type="button" :disabled="importing" @click="refreshCfVodDirectory">刷新目录</button>
+          <button type="button" :disabled="importing" @click="refreshCfVodSource">刷新源</button>
         </div>
-        <p class="home-empty">填 Cloudflare 地址（如 live.ciweihaha.win/vod.json 或 ysp.ciweihaha.win/agg），点保存后直接拉取；随时点刷新重拉，不用改本地文件。</p>
+        <div v-if="cfVodSourceChoice === CF_VOD_SOURCE_MANUAL" class="src-add">
+          <label>手动填地址 <input v-model="cfVodUrl" type="text" placeholder="https://live.ciweihaha.win/vod.json" :disabled="importing" /></label>
+          <button type="button" :disabled="importing || !isValidCfVodURL(cfVodUrl)" @click="saveCfVodUrl">保存并拉取</button>
+        </div>
+        <div class="src-add">
+          <label>点播源目录地址 <input v-model="cfVodDirectoryUrl" type="text" placeholder="https://live.ciweihaha.win/vod-sources.json" :disabled="importing" /></label>
+          <button type="button" :disabled="importing || !isValidCfVodURL(cfVodDirectoryUrl)" @click="saveCfVodDirectoryUrl">保存目录地址</button>
+        </div>
+        <p class="home-empty">下拉框里的源从目录地址自动拉取，有新增的源就自动出现；选了就直接拉取，不用改本地文件。目录拉不到时用内置的几个源，也能手动填地址。</p>
+        <p v-if="cfVodDirectoryMsg" class="home-empty">{{ cfVodDirectoryMsg }}</p>
         <p v-if="vodSourceStatus" class="home-empty">当前来源：{{ vodSourceKindLabel(vodSourceStatus.Kind) }} · {{ vodSourceStatus.Sites }} 个站点<span v-if="vodSourceStatus.Kind === 'cloudflare' && vodSourceStatus.UpdatedAt"> · 上次拉取 {{ new Date(vodSourceStatus.UpdatedAt * 1000).toLocaleString() }}</span></p>
         <div class="src-add">
           <button type="button" :disabled="importing || !vodSourceStatus?.LocalRef" @click="useLocalVodSource">用本地源</button>
@@ -2389,61 +2495,55 @@ onBeforeUnmount(() => {
     </section>
     </div>
 
-    <!-- 点播详情弹窗：海报大图 + 简介 + 播放器 + 剧集 + 更多类似内容 -->
-    <div v-if="mode === 'vod' && vodView === 'detail' && vodDetail" class="vod-detail-overlay" @click.self="backFromVodDetail">
-      <div class="vod-detail-modal" role="dialog" aria-modal="true" aria-label="影片详情">
+    <!-- 点播详情整页：上半部分左是播放区、右是海报+介绍，下半部分是选集网格 -->
+    <div v-if="mode === 'vod' && vodView === 'detail' && vodDetail" class="vod-detail-page">
+      <div class="vod-detail">
         <VodDetailHeader @back="backFromVodDetail" />
-        <div class="vod-detail">
-            <div class="vod-detail-hero">
-              <div class="vod-hero-bg" aria-hidden="true">
-                <img v-if="vodDetail.Logo && !detailLogoFailed" :src="vodDetail.Logo" alt="" @error="detailLogoFailed = true" />
-                <span v-else class="vod-hero-bg-fallback" :style="{ background: posterGradient(vodDetail.Title) }" aria-hidden="true"></span>
-              </div>
-              <div class="vod-hero-body">
-                <span class="vod-hero-poster">
-                  <img v-if="vodDetail.Logo && !detailLogoFailed" :src="vodDetail.Logo" class="poster" referrerpolicy="no-referrer" @error="detailLogoFailed = true" />
-                  <span v-else class="content-card-fallback" :style="{ background: posterGradient(vodDetail.Title) }" aria-hidden="true">{{ vodDetail.Title.slice(0, 1) }}</span>
-                </span>
-                <div class="vod-hero-info">
-                  <h2>{{ vodDetail.Title }}</h2>
-                  <p v-if="vodDetail.Type || vodDetail.Year || vodDetail.Area" class="meta">{{ [vodDetail.Type, vodDetail.Year, vodDetail.Area].filter(Boolean).join(' · ') }}</p>
-                  <div class="vod-hero-actions">
-                    <p v-if="vodDetail.Remarks" class="vod-hero-remarks">{{ vodDetail.Remarks }}</p>
-                    <button class="favorite-toggle" type="button" :aria-pressed="vodFavorited" @click="toggleVodFavorite">{{ vodFavorited ? '取消收藏' : '收藏' }}</button>
-                  </div>
-                  <div class="desc" :class="{ expanded: descExpanded }" v-html="vodDetail.Description"></div>
-                  <button v-if="vodDetail.Description" class="desc-toggle" type="button" @click="descExpanded = !descExpanded">{{ descExpanded ? '收起简介' : '展开简介' }}</button>
-                </div>
-              </div>
-            </div>
-            <div class="vod-detail-main">
-              <div class="vod-player">
-                <p v-if="vodNowPlaying" class="vod-now-playing">正在播放：{{ vodNowPlaying }}</p>
-                <p v-if="vodPlaybackStatus === 'error'" class="playback-error" aria-live="assertive">剧集播放失败：{{ vodPlaybackError }}</p>
-                <PlaybackView :plan="vodPagePlaybackPlan" :seek-to="pendingSeek" :loading="vodPlayerLoading" :skip-marks="vodSkipMarks" @mark-intro="(p) => markSkipAt('intro', p)" @mark-outro="(p) => markSkipAt('outro', p)" @reset-intro="resetSkipMark('intro')" @reset-outro="resetSkipMark('outro')" :suppress-fallback="playbackSettings.AutoSwitchSource" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" @fallback="(id, position) => fallbackToMpv('vod', id, vodPlaybackToken, position)" @playback="(state, message) => onVodPlaybackSignal(vodPlaybackToken, state, message)" @progress="(time, duration) => onVodProgress(vodPlaybackToken, time, duration)" />
-                <PreloadView :plan="preloadPlan" />
-                <div v-if="vodSkipNotice" class="skip-notice">{{ vodSkipNotice }}</div>
-              </div>
-              <aside class="vod-episodes">
-                <div v-if="(vodDetail.Sources ?? []).length" class="ep-src-tabs">
-                  <button v-for="src in vodDetail.Sources" :key="src" :class="{ active: src === activeSource }" @click="selectEpisodeSource(src)">{{ src }}</button>
-                </div>
-                <div v-if="episodeRanges.length > 1" class="ep-pagination-wrap" role="navigation" aria-label="剧集分页">
-                  <button class="ep-pagination-arrow" type="button" aria-label="向左滚动剧集分页" title="向左滚动" @click="scrollEpisodePages(-1)">‹</button>
-                  <div ref="episodePagination" class="ep-pagination">
-                    <button v-for="(range, index) in episodeRanges" :key="range.start" type="button"
-                            :class="{ active: index === episodePage }" :aria-current="index === episodePage ? 'page' : undefined"
-                            @click="selectEpisodePage(index)">{{ range.start }}~{{ range.end }}集</button>
-                  </div>
-                  <button class="ep-pagination-arrow" type="button" aria-label="向右滚动剧集分页" title="向右滚动" @click="scrollEpisodePages(1)">›</button>
-                </div>
-                <div class="ep-list">
-                  <button v-for="ep in visibleEpisodes" :key="ep.ID" :class="{ active: ep.ID === currentEpisodeID }"
-                          @click="playEpisode(ep)">{{ ep.Name }}</button>
-                </div>
-              </aside>
-            </div>
+        <div class="vod-detail-top">
+          <div class="vod-detail-player">
+            <p v-if="vodNowPlaying" class="vod-now-playing">正在播放：{{ vodNowPlaying }}</p>
+            <p v-if="vodPlaybackStatus === 'error'" class="playback-error" aria-live="assertive">剧集播放失败：{{ vodPlaybackError }}</p>
+            <PlaybackView ref="vodPlayerRef" :plan="vodPagePlaybackPlan" :seek-to="pendingSeek" :loading="vodPlayerLoading" :skip-marks="vodSkipMarks" :mpv-paused="mpvPaused" @mark-intro="(p) => markSkipAt('intro', p)" @mark-outro="(p) => markSkipAt('outro', p)" @reset-intro="resetSkipMark('intro')" @reset-outro="resetSkipMark('outro')" :suppress-fallback="playbackSettings.AutoSwitchSource" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" @fallback="(id, position) => fallbackToMpv('vod', id, vodPlaybackToken, position)" @playback="(state, message) => onVodPlaybackSignal(vodPlaybackToken, state, message)" @progress="(time, duration) => onVodProgress(vodPlaybackToken, time, duration)" @toggle-pause="toggleMpvPause" />
+            <PreloadView :plan="preloadPlan" />
+            <div v-if="vodSkipNotice" class="skip-notice">{{ vodSkipNotice }}</div>
           </div>
+          <div class="vod-detail-info">
+            <div class="vod-detail-poster-row">
+              <span class="vod-detail-poster">
+                <img v-if="vodDetail.Logo && !detailLogoFailed" :src="vodDetail.Logo" class="poster" referrerpolicy="no-referrer" @error="detailLogoFailed = true" />
+                <span v-else class="content-card-fallback" :style="{ background: posterGradient(vodDetail.Title) }" aria-hidden="true">{{ vodDetail.Title.slice(0, 1) }}</span>
+              </span>
+              <div class="vod-detail-poster-meta">
+                <h2>{{ vodDetail.Title }}</h2>
+                <p v-if="vodDetail.Type || vodDetail.Year || vodDetail.Area" class="meta">{{ [vodDetail.Type, vodDetail.Year, vodDetail.Area].filter(Boolean).join(' · ') }}</p>
+                <div class="vod-detail-actions">
+                  <p v-if="vodDetail.Remarks" class="vod-detail-remarks">{{ vodDetail.Remarks }}</p>
+                  <button class="favorite-toggle" type="button" :aria-pressed="vodFavorited" @click="toggleVodFavorite">{{ vodFavorited ? '取消收藏' : '收藏' }}</button>
+                </div>
+              </div>
+            </div>
+            <div class="desc" :class="{ expanded: descExpanded }" v-html="vodDetail.Description"></div>
+            <button v-if="vodDetail.Description" class="desc-toggle" type="button" @click="descExpanded = !descExpanded">{{ descExpanded ? '收起简介' : '展开简介' }}</button>
+          </div>
+        </div>
+        <section class="vod-detail-episodes">
+          <div v-if="(vodDetail.Sources ?? []).length" class="ep-src-tabs">
+            <button v-for="src in vodDetail.Sources" :key="src" :class="{ active: src === activeSource }" @click="selectEpisodeSource(src)">{{ src }}</button>
+          </div>
+          <div v-if="episodeRanges.length > 1" class="ep-pagination-wrap" role="navigation" aria-label="剧集分页">
+            <button class="ep-pagination-arrow" type="button" aria-label="向左滚动剧集分页" title="向左滚动" @click="scrollEpisodePages(-1)">‹</button>
+            <div ref="episodePagination" class="ep-pagination">
+              <button v-for="(range, index) in episodeRanges" :key="range.start" type="button"
+                      :class="{ active: index === episodePage }" :aria-current="index === episodePage ? 'page' : undefined"
+                      @click="selectEpisodePage(index)">{{ range.start }}~{{ range.end }}集</button>
+            </div>
+            <button class="ep-pagination-arrow" type="button" aria-label="向右滚动剧集分页" title="向右滚动" @click="scrollEpisodePages(1)">›</button>
+          </div>
+          <div class="ep-list">
+            <button v-for="ep in visibleEpisodes" :key="ep.ID" :class="{ active: ep.ID === currentEpisodeID }"
+                    @click="playEpisode(ep)">{{ ep.Name }}</button>
+          </div>
+        </section>
         <section v-if="similarItems.length" class="vod-similar">
           <h3>更多类似内容</h3>
           <ContentCardList

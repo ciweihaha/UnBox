@@ -763,60 +763,75 @@ body {
   flex-shrink: 0;
 }
 
-/* 详情页 Hero：海报模糊放大做背景 + 前景竖版海报 + 标题/元信息/简介。 */
-.vod-detail-hero {
-  position: relative;
+/* 详情页上半区：左是播放区、右是海报+介绍；窄窗时上下叠放，播放区仍在上。 */
+.vod-detail-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 1rem;
+  align-items: start;
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 900px) {
+  .vod-detail-top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.vod-detail-player {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.vod-detail-player .playback-view {
   flex: 0 0 auto;
+  width: 100%;
+  height: auto;
+  min-height: 180px;
+  max-height: min(50vh, 480px);
   overflow: hidden;
-  margin-bottom: 0.75rem;
+  contain: layout paint;
+}
+
+.vod-detail-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0.75rem;
   background: var(--panel);
   border: 1px solid var(--panel-border);
-  border-radius: var(--radius-lg);
-  isolation: isolate;
+  border-radius: var(--radius-md);
 }
 
-.vod-hero-bg {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
+.vod-detail-info h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1.3rem;
 }
 
-.vod-hero-bg img,
-.vod-hero-bg-fallback {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  filter: blur(24px) brightness(0.55);
-  transform: scale(1.15);
+.vod-detail-info .meta {
+  margin: 0 0 0.5rem;
+  color: var(--text-dim);
 }
 
-.vod-hero-bg::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.15) 60%, transparent 100%);
-}
-
-.vod-hero-body {
-  position: relative;
-  z-index: 1;
+.vod-detail-poster-row {
   display: flex;
-  gap: 1.25rem;
-  align-items: stretch;
-  padding: 1.25rem 1.5rem;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 0.6rem;
 }
 
-.vod-hero-poster {
+.vod-detail-poster {
   flex: 0 0 auto;
-  width: 200px;
+  width: 150px;
   aspect-ratio: 2 / 3;
   overflow: clip;
   border-radius: var(--radius-md);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
-.vod-hero-poster .poster {
+.vod-detail-poster .poster {
   display: block;
   width: 100%;
   height: 100%;
@@ -824,32 +839,27 @@ body {
   background: var(--row-alt);
 }
 
-.vod-hero-poster .content-card-fallback {
-  font-size: 4rem;
+.vod-detail-poster .content-card-fallback {
+  font-size: 3rem;
 }
 
-.vod-hero-info {
+.vod-detail-poster-meta {
   display: flex;
   flex-direction: column;
   min-width: 0;
   flex: 1;
-  color: var(--text-white);
 }
 
-.vod-hero-info h2 {
-  margin: 0 0 0.4rem;
-  color: var(--text-white);
-  font-size: 1.4rem;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
+/* 「已完结」徽标与收藏按钮排成一行操作区。 */
+.vod-detail-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0 0 0.6rem;
 }
 
-.vod-hero-info .meta {
-  margin: 0 0 0.5rem;
-  color: rgba(255, 255, 255, 0.82);
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
-}
-
-.vod-hero-remarks {
+.vod-detail-remarks {
   display: inline-block;
   margin: 0;
   padding: 0.15rem 0.6rem;
@@ -860,55 +870,19 @@ body {
   font-size: 0.8rem;
 }
 
-/* 「已完结」徽标与收藏按钮排成一行操作区。 */
-.vod-hero-actions {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  flex-wrap: wrap;
-  margin: 0 0 0.6rem;
-}
-
-.vod-hero-info .favorite-toggle {
-  margin: 0;
+/* 暂停提示：空格暂停时居中叠在画面上，继续后消失。 */
+.pause-badge {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 5;
+  transform: translate(-50%, -50%);
+  padding: 0.6rem 1.2rem;
   color: var(--text-white);
-  background: rgba(0, 0, 0, 0.4);
-  border-color: rgba(255, 255, 255, 0.35);
-}
-
-/* 详情主体：播放器在左占大头，选集面板在右固定 300px；窄窗时上下叠放。 */
-.vod-detail-main {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 1rem;
-  align-items: start;
-  flex: 1;
-  min-height: 0;
-  margin-bottom: 0.75rem;
-}
-
-@media (max-width: 900px) {
-  .vod-detail-main {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.vod-detail-main .vod-player {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  margin: 0;
-}
-
-.vod-detail-main .vod-player .playback-view {
-  flex: 0 0 auto;
-  width: 100%;
-  height: auto;
-  min-height: 180px;
-  max-height: min(50vh, 480px);
-  overflow: hidden;
-  contain: layout paint;
+  background: rgba(0, 0, 0, 0.65);
+  border-radius: 999px;
+  font-size: 1.1rem;
+  pointer-events: none;
 }
 
 /* 正在播放状态行：收进播放器上方，弱化显示（圆点 + 暗色文字），不再是弹窗顶部飘红字。 */
@@ -1565,6 +1539,34 @@ body {
 }
 
 /* ---- 详情加载中：详情请求在跑时挂在底部，z-index 低于弹窗遮罩（100） ---- */
+
+/* ---- 设置弹窗遮罩：fixed 盖满全屏、半透明底、面板居中 ----
+   2026-11-19 回归：.settings-overlay/.settings-panel 原来没有基础样式，
+   div 按普通块排在设置页文档流里，「关于我们」面板直接叠在设置内容上。
+   遮罩 z-index 100，盖住顶部导航（60）与详情加载条（90）。 */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.settings-panel {
+  width: 94vw;
+  max-width: 560px;
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--panel);
+  box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.45);
+}
 
 .detail-loading {
   position: fixed;
@@ -2811,11 +2813,14 @@ body[data-theme="8bit"],
 .vod-layout {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .vod-main {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-width: 0;
   min-height: 0;
   background: var(--panel);
@@ -2898,8 +2903,6 @@ body[data-theme="8bit"],
   min-height: 0;
   display: flex;
   flex-direction: column;
-  /* Hero + 播放器 + 选集面板整体可纵向滚动：矮窗口下不裁内容。 */
-  overflow-y: auto;
   overflow-x: hidden;
   padding: 1rem;
 }
@@ -3267,39 +3270,50 @@ body[data-theme="8bit"],
   background: #e50914;
 }
 
-/* 点播详情弹窗：fixed 遮罩 + 深色面板，替代原来的内嵌详情页。
-   弹窗自身滚动，里面的 .vod-detail 不再自己滚动。 */
-.vod-detail-overlay {
+/* 点播详情整页：fixed 盖住首页（不透明底），替代原来的半透明浮层；
+   点进去就整页切换，背后看不到首页；页面自身滚动，选集不再限高。 */
+.vod-detail-page {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: 100;
   overflow-y: auto;
-  padding: 1.75rem 0.75rem 3.75rem;
-  background: rgba(0, 0, 0, 0.72);
+  background: var(--bg);
 }
 
-.vod-detail-modal {
-  max-width: 1080px;
+.vod-detail-page .vod-detail {
+  max-width: 1200px;
   margin: 0 auto;
-  overflow: hidden;
-  background: #181818;
-  border-radius: 8px;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.8);
-  animation: vod-modal-pop 0.25s ease;
-}
-
-@keyframes vod-modal-pop {
-  from { transform: scale(0.96) translateY(14px); opacity: 0.4; }
-  to { transform: none; opacity: 1; }
-}
-
-.vod-detail-modal .vod-detail-head {
-  padding: 0.75rem 1rem 0;
-}
-
-.vod-detail-modal .vod-detail {
+  padding: 0 1.25rem 2rem;
   overflow: visible;
-  padding: 0 0 1rem;
+}
+
+.vod-detail-page .vod-detail-head {
+  padding: 0.75rem 0 0;
+}
+
+.vod-detail-episodes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.75rem;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+}
+
+.vod-detail-episodes .ep-src-tabs {
+  margin: 0;
+}
+
+.vod-detail-episodes .ep-pagination-wrap {
+  margin: 0;
+}
+
+.vod-detail-episodes .ep-list {
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  max-height: none;
 }
 
 .vod-similar {

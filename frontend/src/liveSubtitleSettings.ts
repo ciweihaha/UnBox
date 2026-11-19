@@ -55,6 +55,23 @@ export interface LiveSubtitleStatus {
   Error: string
 }
 
+/**
+ * liveSubtitleStatusText 把字幕引擎状态翻成设置页能看懂的一句话。
+ *
+ * 开关只表示“已启用”，引擎只在播英文直播（网页播放）时才启动，
+ * 所以“开着却未启动”是正常待机、不是故障——文案必须写清楚原因，
+ * 不能一边显示开、一边只说“未启动”让用户糊涂。
+ */
+export function liveSubtitleStatusText(st: LiveSubtitleStatus | null): string {
+  if (!st) return '直播字幕状态查不到，稍后再试'
+  if (st.Running) {
+    return `直播字幕运行中，最近延迟约 ${(st.LastLatencyMs / 1000).toFixed(1)} 秒`
+  }
+  if (st.Error) return `直播字幕异常：${st.Error}`
+  if (!st.Enabled) return '直播字幕已关闭：打开上方开关后，看英文直播时自动启动'
+  return '已开启，尚未启动：开始播英文直播（网页播放）后自动启动'
+}
+
 export interface LiveSubtitleSettingsStore {
   settings: Ref<LiveSubtitleSettings>
   load: () => Promise<void>
