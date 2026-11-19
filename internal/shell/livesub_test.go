@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -354,15 +355,17 @@ func TestEnsureLiveSubtitlesForChannelRetriesFailedStart(t *testing.T) {
 	t.Cleanup(func() { liveSubRetryDelay = oldDelay })
 
 	svc := newLiveSubService(t)
-	attempts := 0
+	// attempts 由 EnsureAssets 在后台重试 goroutine 里写、测试主 goroutine 读，
+	// 必须用 atomic，否则 go test -race 报 data race。
+	var attempts atomic.Int32
 	svc.liveSubFactory = func(cfg livesub.ManagerConfig) *livesub.Manager {
 		cfg.Transcriber = &fakeLiveSubTranscriber{text: "hello"}
 		cfg.Translator = &fakeLiveSubTranslator{}
 		cfg.Server = &fakeLiveSubServer{}
 		cfg.EnsureAssets = func(ctx context.Context, dir, model string, p livesub.ProgressFunc) (string, string, error) {
-			attempts++
-			if attempts < 3 {
-				return "", "", fmt.Errorf("模拟下载失败（第 %d 次）", attempts)
+			n := attempts.Add(1)
+			if n < 3 {
+				return "", "", fmt.Errorf("模拟下载失败（第 %d 次）", n)
 			}
 			return "/fake/whisper-server", "/fake/model.bin", nil
 		}
@@ -377,12 +380,12 @@ func TestEnsureLiveSubtitlesForChannelRetriesFailedStart(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("ensure 后 5 秒内管线应跑起来（已尝试 %d 次）", attempts)
+			t.Fatalf("ensure 后 5 秒内管线应跑起来（已尝试 %d 次）", attempts.Load())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if attempts != 3 {
-		t.Fatalf("启动尝试次数 = %d，want 3（前两次失败、第三次成功）", attempts)
+	if attempts.Load() != 3 {
+		t.Fatalf("启动尝试次数 = %d，want 3（前两次失败、第三次成功）", attempts.Load())
 	}
 	if err := svc.StopLiveSubtitles(); err != nil {
 		t.Fatal(err)
@@ -397,14 +400,16 @@ func TestEnsureLiveSubtitlesForChannelStopAbortsRetry(t *testing.T) {
 	t.Cleanup(func() { liveSubRetryDelay = oldDelay })
 
 	svc := newLiveSubService(t)
-	attempts := 0
+	// attempts 由 EnsureAssets 在后台重试 goroutine 里写、测试主 goroutine 读，
+	// 必须用 atomic，否则 go test -race 报 data race。
+	var attempts atomic.Int32
 	svc.liveSubFactory = func(cfg livesub.ManagerConfig) *livesub.Manager {
 		cfg.Transcriber = &fakeLiveSubTranscriber{text: "hello"}
 		cfg.Translator = &fakeLiveSubTranslator{}
 		cfg.Server = &fakeLiveSubServer{}
 		cfg.EnsureAssets = func(ctx context.Context, dir, model string, p livesub.ProgressFunc) (string, string, error) {
-			attempts++
-			return "", "", fmt.Errorf("模拟下载失败（第 %d 次）", attempts)
+			n := attempts.Add(1)
+			return "", "", fmt.Errorf("模拟下载失败（第 %d 次）", n)
 		}
 		return livesub.NewManager(cfg)
 	}
@@ -414,21 +419,21 @@ func TestEnsureLiveSubtitlesForChannelStopAbortsRetry(t *testing.T) {
 	// 等重试确实跑起来（至少两次尝试）。
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if attempts >= 2 {
+		if attempts.Load() >= 2 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("ensure 后 5 秒内应至少尝试 2 次，实际 %d 次", attempts)
+			t.Fatalf("ensure 后 5 秒内应至少尝试 2 次，实际 %d 次", attempts.Load())
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if err := svc.StopLiveSubtitles(); err != nil {
 		t.Fatalf("停止失败: %v", err)
 	}
-	stoppedAt := attempts
+	stoppedAt := attempts.Load()
 	time.Sleep(300 * time.Millisecond)
-	if attempts != stoppedAt {
-		t.Fatalf("停播后又尝试了 %d 次（停时 %d 次）：重试应停，不应复活管线", attempts, stoppedAt)
+	if attempts.Load() != stoppedAt {
+		t.Fatalf("停播后又尝试了 %d 次（停时 %d 次）：重试应停，不应复活管线", attempts.Load(), stoppedAt)
 	}
 	if st := svc.LiveSubtitleStatus(); st.Running {
 		t.Fatal("停播后管线不应跑起来")
