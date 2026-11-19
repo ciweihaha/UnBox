@@ -44,31 +44,6 @@ func useAzureBase(t *testing.T, url string) {
 	t.Cleanup(func() { translateAzureBaseURL = old })
 }
 
-// newGoogleStub 模拟 Cloud Translation 接口：校验 Key，返回固定译文或指定状态。
-func newGoogleStub(t *testing.T, key, translated string, status int) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("key"); got != key {
-			t.Errorf("key 参数 = %q，想要 %q", got, key)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": map[string]any{
-				"translations": []map[string]any{{"translatedText": translated}},
-			},
-		})
-	}))
-}
-
-// useGoogleBase 把谷歌接口入口指向测试服务器，测试结束恢复。
-func useGoogleBase(t *testing.T, url string) {
-	t.Helper()
-	old := translateGoogleBaseURL
-	translateGoogleBaseURL = url
-	t.Cleanup(func() { translateGoogleBaseURL = old })
-}
-
 // newCFStub 模拟 Workers AI 翻译接口：路径与账号对应，返回固定译文或指定状态。
 // 每个测试用不同账号，避免 cfClientFor 的客户端缓存互相串用。
 func newCFStub(t *testing.T, account, translated string, status int, success bool) *httptest.Server {
@@ -117,19 +92,6 @@ func TestTranslateSettingsDefaults(t *testing.T) {
 func TestTranslateSettingsFreeAzureRoundTrip(t *testing.T) {
 	svc, st := newTranslateService(t)
 	want := TranslateSettings{Enabled: true, Provider: ProviderFree, FreeProvider: FreeAzure, FreeAPIKey: "azure-key-1", AzureRegion: "eastasia"}
-	if err := svc.SetTranslateSettings(want); err != nil {
-		t.Fatal(err)
-	}
-	svc2 := newPlaybackSettingsService(t, st)
-	if got := svc2.GetTranslateSettings(); got != want {
-		t.Fatalf("round trip = %#v， want %#v", got, want)
-	}
-}
-
-// 免费接口（谷歌）设置与 Key 要能持久化、重启后读回。
-func TestTranslateSettingsFreeGoogleRoundTrip(t *testing.T) {
-	svc, st := newTranslateService(t)
-	want := TranslateSettings{Enabled: true, Provider: ProviderFree, FreeProvider: FreeGoogle, FreeAPIKey: "google-key-1"}
 	if err := svc.SetTranslateSettings(want); err != nil {
 		t.Fatal(err)
 	}
@@ -220,23 +182,6 @@ func TestTranslateSubtitleFreeAzureTranslates(t *testing.T) {
 	}
 }
 
-func TestTranslateSubtitleFreeGoogleTranslates(t *testing.T) {
-	stub := newGoogleStub(t, "google-key-ok", "你好，世界", http.StatusOK)
-	t.Cleanup(stub.Close)
-	useGoogleBase(t, stub.URL)
-	svc, _ := newTranslateService(t)
-	if err := svc.SetTranslateSettings(TranslateSettings{Enabled: true, Provider: ProviderFree, FreeProvider: FreeGoogle, FreeAPIKey: "google-key-ok"}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := svc.TranslateSubtitle("Hello, world")
-	if err != nil {
-		t.Fatalf("TranslateSubtitle err = %v， want nil", err)
-	}
-	if got != "你好，世界" {
-		t.Fatalf("TranslateSubtitle = %q， want 你好，世界", got)
-	}
-}
-
 func TestTranslateSubtitleFreeCloudflareTranslates(t *testing.T) {
 	stub := newCFStub(t, "acct-ok", "你好，世界", http.StatusOK, true)
 	t.Cleanup(stub.Close)
@@ -292,19 +237,6 @@ func TestCheckTranslateModelFree(t *testing.T) {
 		}
 		if err := svc.CheckTranslateModel(); err == nil {
 			t.Fatal("接口 403 时 CheckTranslateModel err = nil， want 错误")
-		}
-	})
-
-	t.Run("谷歌接口就绪", func(t *testing.T) {
-		stub := newGoogleStub(t, "google-key-check-ok", "你好", http.StatusOK)
-		t.Cleanup(stub.Close)
-		useGoogleBase(t, stub.URL)
-		svc, _ := newTranslateService(t)
-		if err := svc.SetTranslateSettings(TranslateSettings{Enabled: true, Provider: ProviderFree, FreeProvider: FreeGoogle, FreeAPIKey: "google-key-check-ok"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := svc.CheckTranslateModel(); err != nil {
-			t.Fatalf("CheckTranslateModel err = %v， want nil", err)
 		}
 	})
 

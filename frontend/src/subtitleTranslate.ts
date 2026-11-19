@@ -10,10 +10,10 @@ export type TranslateProvider = 'free' | 'off'
 
 export const TRANSLATE_PROVIDERS: TranslateProvider[] = ['free', 'off']
 
-/** 免费接口服务商三选一：微软 Azure（默认）/ 谷歌 / Cloudflare。 */
-export type FreeTranslateProvider = 'azure' | 'google' | 'cloudflare'
+/** 免费接口服务商二选一：微软 Azure（默认）/ Cloudflare。 */
+export type FreeTranslateProvider = 'azure' | 'cloudflare'
 
-export const FREE_TRANSLATE_PROVIDERS: FreeTranslateProvider[] = ['azure', 'google', 'cloudflare']
+export const FREE_TRANSLATE_PROVIDERS: FreeTranslateProvider[] = ['azure', 'cloudflare']
 
 /** 翻译缓存上限：字幕去重后条目有限，超了就清空重记，避免长片看下来无限膨胀。 */
 export const MAX_TRANSLATE_CACHE_ENTRIES = 500
@@ -47,11 +47,7 @@ export function normalizeTranslateSettings(
           ? 'free'
           : 'off'
   let freeProvider: FreeTranslateProvider = 'azure'
-  if (
-    value?.FreeProvider === 'azure' ||
-    value?.FreeProvider === 'google' ||
-    value?.FreeProvider === 'cloudflare'
-  ) {
+  if (value?.FreeProvider === 'azure' || value?.FreeProvider === 'cloudflare') {
     freeProvider = value.FreeProvider
   } else if (legacyProvider === 'cloudflare') {
     freeProvider = 'cloudflare'

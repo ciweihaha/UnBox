@@ -63,14 +63,15 @@ describe('createTranslateSettings', () => {
     const store = createTranslateSettings(api(async () => ({ ...stored }), set))
     await store.load()
 
-    await store.setFreeProvider('google')
-    expect(set).toHaveBeenCalledWith({ ...stored, FreeProvider: 'google' })
-    await store.setFreeAPIKey('  google-key-2  ')
-    expect(store.settings.value.FreeAPIKey).toBe('google-key-2')
-    expect(set).toHaveBeenCalledWith({ ...stored, FreeProvider: 'google', FreeAPIKey: 'google-key-2' })
+    await store.setFreeProvider('cloudflare')
+    expect(set).toHaveBeenCalledWith({ ...stored, FreeProvider: 'cloudflare' })
+    await store.setFreeAPIKey('  azure-key-2  ')
+    expect(store.settings.value.FreeAPIKey).toBe('azure-key-2')
+    expect(set).toHaveBeenCalledWith({ ...stored, FreeProvider: 'cloudflare', FreeAPIKey: 'azure-key-2' })
     await store.setFreeProvider('ollama' as never)
     expect(store.settings.value.FreeProvider).toBe('azure')
   })
+
 
   it('持久化失败保留运行时值并上报错误', async () => {
     const failure = new Error('store closed')
@@ -129,7 +130,6 @@ describe('设置页字幕翻译接线', () => {
     expect(app).toContain('checkTranslateModel')
     expect(app).toContain('免费接口')
     expect(app).toContain('Azure')
-    expect(app).toContain('谷歌')
     expect(app).toContain('Cloudflare')
     expect(app).not.toContain('v-model="translateModel"')
     expect(app).not.toContain('v-model="translateEndpoint"')

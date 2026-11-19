@@ -1,10 +1,11 @@
 // Package shell 的字幕翻译胶水：把 internal/translate 的免费接口翻译客户端
 // 暴露给前端，并把翻译设置持久化到 store.kv。
 //
-// 翻译只走免费接口（Provider=free），来源三选一（FreeProvider）：
+// 翻译只走免费接口（Provider=free），来源二选一（FreeProvider）：
 // 微软 Azure Translator 免费层 F0（每月 200 万字符，默认）、
-// 谷歌 Cloud Translation 免费层（每月 50 万字符）、
 // Cloudflare Workers AI 免费层（每天 10000 neurons）。
+// 谷歌（每月 50 万字符太少）与火山引擎（开通要实名认证+申请，太麻烦）
+// 已于 2026-11-19 按用户决定去掉，不留残留。
 // 本地大模型已不用（2026-11-19 用户决定：效果不好，整档删掉）：
 // 接口超时或失败就返回错误，调用方跳过该行字幕、显示英文原文，
 // 不再回落本地模型。Whisper 听写仍走本地（那是听写不是翻译，不受影响）。
@@ -29,10 +30,9 @@ const (
 	ProviderOff  = "off"
 )
 
-// 免费接口服务商：微软 Azure（默认）、谷歌、Cloudflare。
+// 免费接口服务商：微软 Azure（默认）、Cloudflare。
 const (
 	FreeAzure      = "azure"
-	FreeGoogle     = "google"
 	FreeCloudflare = "cloudflare"
 )
 
@@ -50,14 +50,13 @@ const (
 // 免费接口的 API 入口；为空时用各客户端的默认入口，
 // 测试可注入 httptest 地址（与 liveSubRetryDelay 同一做法）。
 var (
-	translateCFBaseURL     = ""
-	translateAzureBaseURL  = ""
-	translateGoogleBaseURL = ""
+	translateCFBaseURL    = ""
+	translateAzureBaseURL = ""
 )
 
 // TranslateSettings 是字幕翻译选项：只做英译中，默认关闭。
-// FreeAPIKey 是 Azure / 谷歌的 API Key（用户自己去微软/谷歌免费开，
-// F0 与免费层都不收费）；Cloudflare 用 CFAccountID + CFToken。
+// FreeAPIKey 是 Azure 的 API Key（用户自己去微软免费开，
+// F0 免费层不收费）；Cloudflare 用 CFAccountID + CFToken。
 type TranslateSettings struct {
 	Enabled      bool
 	Provider     string
@@ -88,7 +87,7 @@ func normalizeTranslateProvider(provider string, enabled bool) string {
 // normalizeFreeProvider 把免费接口服务商归一化；空值或非法值默认 Azure。
 func normalizeFreeProvider(provider string) string {
 	switch strings.TrimSpace(provider) {
-	case FreeAzure, FreeGoogle, FreeCloudflare:
+	case FreeAzure, FreeCloudflare:
 		return strings.TrimSpace(provider)
 	default:
 		return FreeAzure
@@ -183,8 +182,6 @@ func (s *ShellService) TranslateSubtitle(text string) (string, error) {
 // 失败不回落（本地模型已删），直接返回错误由调用方跳过该行。
 func (s *ShellService) translateWithProvider(ctx context.Context, settings TranslateSettings, text string) (string, error) {
 	switch settings.FreeProvider {
-	case FreeGoogle:
-		return googleClientFor(settings.FreeAPIKey).Translate(ctx, text)
 	case FreeCloudflare:
 		return cfClientFor(settings.CFAccountID, settings.CFToken).Translate(ctx, text)
 	default:
@@ -201,8 +198,6 @@ func (s *ShellService) CheckTranslateModel() error {
 		return errors.New("字幕翻译已关闭")
 	}
 	switch settings.FreeProvider {
-	case FreeGoogle:
-		return googleClientFor(settings.FreeAPIKey).Check(context.Background())
 	case FreeCloudflare:
 		return cfClientFor(settings.CFAccountID, settings.CFToken).Check(context.Background())
 	default:
@@ -230,10 +225,9 @@ func (t *settingsTranslator) Translate(ctx context.Context, text string) (string
 }
 
 var (
-	freeTranslateClientMu  sync.Mutex
-	azureTranslateClients  = map[string]*translate.AzureClient{}
-	googleTranslateClients = map[string]*translate.GoogleClient{}
-	cfTranslateClients     = map[string]*translate.CFClient{}
+	freeTranslateClientMu sync.Mutex
+	azureTranslateClients = map[string]*translate.AzureClient{}
+	cfTranslateClients    = map[string]*translate.CFClient{}
 )
 
 // azureClientFor 按「Key+区域」复用 Azure 免费接口客户端；设置改了才新建。
@@ -246,19 +240,6 @@ func azureClientFor(apiKey, region string) *translate.AzureClient {
 	}
 	c := translate.NewAzureClient(apiKey, region, translateAzureBaseURL, 0)
 	azureTranslateClients[key] = c
-	return c
-}
-
-// googleClientFor 按 Key 复用谷歌免费接口客户端；设置改了才新建。
-func googleClientFor(apiKey string) *translate.GoogleClient {
-	key := strings.TrimSpace(apiKey)
-	freeTranslateClientMu.Lock()
-	defer freeTranslateClientMu.Unlock()
-	if c, ok := googleTranslateClients[key]; ok {
-		return c
-	}
-	c := translate.NewGoogleClient(apiKey, translateGoogleBaseURL, 0)
-	googleTranslateClients[key] = c
 	return c
 }
 

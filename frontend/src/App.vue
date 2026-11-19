@@ -228,7 +228,7 @@ function togglePlaybackSetting(key: PlaybackSettingKey, value: boolean) {
   void playbackSettingsStore.set(key, value)
 }
 
-// 字幕翻译：英译中，默认关；只走免费接口（微软 Azure / 谷歌 / Cloudflare）。
+// 字幕翻译：英译中，默认关；只走免费接口（微软 Azure / Cloudflare）。
 // 失败时显示原文、不挡播放；两个播放器共用同一个翻译器（缓存共享）。
 const translateSettingsStore = createTranslateSettings(
   ShellService as unknown as TranslateSettingsApi,
@@ -2336,7 +2336,7 @@ onBeforeUnmount(() => {
 
       <section class="src-section">
         <h3>字幕翻译</h3>
-        <p class="home-empty">把英文字幕实时翻成中文（接口失败时显示原文，不影响播放）。免费接口要自己去微软 / 谷歌免费开个 Key 贴进来，不收费；也可以用 Cloudflare 免费层。</p>
+        <p class="home-empty">把英文字幕实时翻成中文（接口失败时显示原文，不影响播放）。免费接口要自己去微软免费开个 Key 贴进来，不收费；也可以用 Cloudflare 免费层。</p>
         <div class="settings-personalize">
           <button type="button" class="settings-choice" :class="{ active: translateSettings.Provider === 'free' }" title="用免费接口翻译" :aria-pressed="translateSettings.Provider === 'free'" @click="setTranslateProvider('free')">免费接口</button>
           <button type="button" class="settings-choice" :class="{ active: translateSettings.Provider === 'off' }" title="不翻译，显示英文原文" :aria-pressed="translateSettings.Provider === 'off'" @click="setTranslateProvider('off')">关闭</button>
@@ -2344,22 +2344,17 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="translateSettings.Provider === 'free'" class="settings-personalize">
           <button type="button" class="settings-choice" :class="{ active: translateSettings.FreeProvider === 'azure' }" @click="setTranslateFreeProvider('azure')">微软 Azure</button>
-          <button type="button" class="settings-choice" :class="{ active: translateSettings.FreeProvider === 'google' }" @click="setTranslateFreeProvider('google')">谷歌</button>
           <button type="button" class="settings-choice" :class="{ active: translateSettings.FreeProvider === 'cloudflare' }" @click="setTranslateFreeProvider('cloudflare')">Cloudflare</button>
         </div>
         <div v-if="translateSettings.Provider === 'free' && translateSettings.FreeProvider === 'azure'" class="src-add">
           <label>API Key <input v-model="translateFreeAPIKey" type="password" placeholder="Azure Translator 的 Key（F0 免费层）" /></label>
           <label>区域（可选） <input v-model="translateAzureRegion" type="text" placeholder="如 eastasia，留空也行" /></label>
         </div>
-        <div v-if="translateSettings.Provider === 'free' && translateSettings.FreeProvider === 'google'" class="src-add">
-          <label>API Key <input v-model="translateFreeAPIKey" type="password" placeholder="Google Cloud 的 API Key（免费层）" /></label>
-        </div>
         <div v-if="translateSettings.Provider === 'free' && translateSettings.FreeProvider === 'cloudflare'" class="src-add">
           <label>账号 ID <input v-model="translateCFAccountID" type="text" placeholder="Cloudflare 账号 ID" /></label>
           <label>API 令牌 <input v-model="translateCFToken" type="password" placeholder="有 Workers AI 权限的 API 令牌" /></label>
         </div>
         <p v-if="translateSettings.Provider === 'free' && translateSettings.FreeProvider === 'azure'" class="home-empty">Key 在 Azure 门户免费开 Translator 资源（F0 层，每月 200 万字符免费）获取，只存在本机。</p>
-        <p v-if="translateSettings.Provider === 'free' && translateSettings.FreeProvider === 'google'" class="home-empty">Key 在 Google Cloud 控制台免费开（启用 Cloud Translation API，每月 50 万字符免费）获取，只存在本机。</p>
         <p v-if="translateSettings.Provider === 'free' && translateSettings.FreeProvider === 'cloudflare'" class="home-empty">令牌在 Cloudflare 控制台 → API 令牌 → 创建令牌（选 Workers AI 模板）获取，只存在本机。免费层每天 10000 neurons，字幕短句够用。</p>
         <p v-if="translateModelMsg" class="home-empty">{{ translateModelMsg }}</p>
       </section>

@@ -91,19 +91,20 @@ describe('normalizeTranslateSettings', () => {
     })
   })
 
+
   it('免费接口 + 服务商 + Key 原样保留', () => {
     expect(
       normalizeTranslateSettings({
         Enabled: true,
         Provider: 'free',
-        FreeProvider: 'google',
-        FreeAPIKey: 'google-key-1',
+        FreeProvider: 'azure',
+        FreeAPIKey: 'azure-key-1',
       }),
     ).toEqual({
       Enabled: true,
       Provider: 'free',
-      FreeProvider: 'google',
-      FreeAPIKey: 'google-key-1',
+      FreeProvider: 'azure',
+      FreeAPIKey: 'azure-key-1',
       AzureRegion: '',
       CFAccountID: '',
       CFToken: '',
