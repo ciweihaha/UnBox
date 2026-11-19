@@ -198,6 +198,70 @@ function Find-PlayerGroup {
   return $null
 }
 
+function Find-DeepestPlayerGroup {
+  # 真正的播放器（PlaybackView）：含 Slider 的 Group 里最深（最后）的一个。
+  # Find-PlayerGroup 返回第一个（最外层容器，约等于视口 1233x725），拿它量
+  # 详情等高（T29b）会拿 h2/页签跟页面边框比、恒错；这里取最深的才是播放器本身。
+  $found = $null
+  $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  foreach ($e in $all) {
+    try {
+      if ($e.Current.ControlType.ProgrammaticName -ne 'ControlType.Group') { continue }
+      $r = $e.Current.BoundingRectangle
+      if ($r.Width -lt 300 -or $r.Height -lt 150) { continue }
+      $subs = $e.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+      foreach ($s in $subs) {
+        try {
+          if ($s.Current.ControlType.ProgrammaticName -eq 'ControlType.Slider') { $found = $e; break }
+        } catch { }
+      }
+    } catch { }
+  }
+  return $found
+}
+
+$script:LastLiveDead = @()
+function Find-WorkingLiveChannel {
+  param([string[]]$Exclude = @(), [int]$PerRowSeconds = 20, [int]$MaxRows = 5)
+  # 找一条真能播的直播台，返回台名（找不到返回 ''）。
+  # 顺序：CCTV综合优先，其余 CCTV，其次 BBC，再是其它所有行；每类最多试
+  # $MaxRows 行（总数不封顶，不然 CCTV 死台一多就永远到不了 BBC）。
+  # 中继（SCF）一断就是一片 410，死守 CCTV 会白白浪费时间；点行后要等到
+  # 进度 >0 才算播起来（只看状态会误判，报错状态也算“换台成功”）。
+  # 死台不用等满整段：状态一变“频道播放失败”就跳过（403 的台几秒就报错）。
+  # 死台记进 $script:LastLiveDead。注意：'*' 会把已试过的行再列一遍，
+  # 靠 $tried 去重；非频道行被点到也只会读不到进度、被记死，不会误报
+  # （播着的旧台若还在前进，进度读数会归到旧台——这种误报只影响台名，
+  # 不影响“有没有台在播”这个结论）。
+  $script:LastLiveDead = @()
+  $patterns = @('*CCTV综合*', '*CCTV*', '*BBC*', '*')
+  $tried = @()
+  foreach ($pat in $patterns) {
+    $rows = Find-ChannelRows -Root $script:Win -NameLike $pat
+    $perPat = 0
+    foreach ($row in $rows) {
+      if ($perPat -ge $MaxRows) { break }
+      $nm = ''
+      try { $nm = $row.Current.Name } catch { continue }
+      if (-not $nm -or $Exclude -contains $nm -or $tried -contains $nm) { continue }
+      $tried += $nm
+      $perPat++
+      Invoke-Element $row | Out-Null
+      $p = $null
+      $elapsed = 0
+      while ($elapsed -lt $PerRowSeconds) {
+        Start-Sleep -Seconds 2
+        $elapsed += 2
+        $p = Get-PlayerProgress
+        if ($null -ne $p -and $p -gt 0) { return $nm }
+        if ((Get-StatusNames) -like '*频道播放失败*') { break }
+      }
+      $script:LastLiveDead += $nm
+    }
+  }
+  return ''
+}
+
 function Get-ScrollPercentAt {
   param([int]$X, [int]$Y)
   $pt = New-Object System.Windows.Point($X, $Y)
@@ -229,6 +293,10 @@ function Test-WheelScrolls {
   # 元素当标尺，看滚轮后它的 Y 是否移动。旧量法用 FromPoint 取元素，
   # WebView2 宿主元素没名字（item=''），量出来的 yAfter 恒为空，滚没滚
   # 都判失败，所以改成按名字找标尺。
+  # 先往上滚几下回到顶（页面若已到底，往下滚就动不了，会误判滚轮坏了；
+  # 第四轮 T10 就是这么丢的）。再找标尺、记 yBefore、往下滚、记 yAfter。
+  Send-Wheel -Delta 360 -Clicks 3
+  Start-Sleep -Milliseconds 800
   $ruler = $null
   $wr = Get-WindowRect
   $all = $script:Win.FindAll($script:TreeScope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
@@ -377,23 +445,11 @@ $wr = Get-WindowRect
 $liveList = Find-Element -Root $script:Win -Name 'CCTV'
 Test-WheelScrolls -Id 'T12' -Name '滚轮：直播列表能滚' -X ([int]($wr.X + 200)) -Y ([int]($wr.Y + $wr.Height / 2))
 Shot -Tag 'live' | Out-Null
-# 先点第一行播起来（播放器、进度条都是播后才出现），再量两栏与播放区。
-# CCTV-1 偶尔起不来（源不稳）：冷启动中继取流慢，首播等 45 秒（原来 20 秒
-# 不够，T16 在 0:00 上等满了两轮）；没进度就换 CCTV-2 再试，记下用的台。
-# 频道行名是“CCTV-2 财经”这种，旧兜底 '*CCTV财经*' 永远匹配不到，改成 '*财经*'。
-$firstRow = Find-ChannelRow -Root $script:Win -NameLike '*CCTV综合*'
-if (-not $firstRow) { $firstRow = Find-ChannelRow -Root $script:Win -NameLike '*CCTV*' }
-if ($firstRow) { Invoke-Element $firstRow | Out-Null }
-$p0 = Wait-PlayerProgress -Seconds 45
-$liveChannelUsed = 'CCTV综合'
-if ($null -eq $p0 -or $p0 -le 0) {
-  $secondRow = Find-ChannelRow -Root $script:Win -NameLike '*财经*'
-  if ($secondRow) {
-    Invoke-Element $secondRow | Out-Null
-    $p0 = Wait-PlayerProgress -Seconds 30
-    $liveChannelUsed = 'CCTV财经'
-  }
-}
+# 先找一条真能播的台（CCTV综合优先，其余 CCTV，其次 BBC，再是其它行），
+# 找到的台名记下来，后面 T16/T17 用。冷启动中继取流慢，单台等 30 秒；
+# 中继一断就是一片 410，死守 CCTV 会白白浪费时间，所以不只试 CCTV。
+$liveChannelUsed = Find-WorkingLiveChannel -PerRowSeconds 30 -MaxRows 5
+$p0 = Get-PlayerProgress
 $liveStatusAtStart = Get-StatusNames
 $playerGroup = Find-PlayerGroup
 $pgRect = Get-ElementRect $playerGroup
@@ -475,14 +531,18 @@ Start-Sleep -Seconds 3
 $q2 = Get-PlayerProgress
 Add-Result -Id 'T29a' -Name '点播能播（进度前进）' -Pass ($null -ne $q1 -and $null -ne $q2 -and $q2 -gt $q1) -Evidence "q1=$q1 q2=$q2"
 # 详情是整页：点集播起来后才有播放器容器，播后再量。
-$detailPlayer = Find-PlayerGroup
+# 用最深的 Group（真播放器）：Find-PlayerGroup 返回的是最外层容器（约等于视口），
+# 拿它量 T29b 等高会恒错。
+$detailPlayer = Find-DeepestPlayerGroup
 $dpRect = Get-ElementRect $detailPlayer
 Add-Result -Id 'T30' -Name '详情是整页（播放区宽≥700）' -Pass (($null -ne $detailPlayer) -and $dpRect.Width -ge 700) -Evidence "playerW=$($dpRect.Width) playerH=$($dpRect.Height)"
 # 详情左右等高（T29b）：信息栏是 grid 右列（align-items: stretch），
 # 顶 = 行顶、底 = 行底。信息栏容器本身 UIA 不暴露，用两处量：
-# 栏内 h2 标题顶（栏顶 + 12px 内边距）≈ 播放器顶（±16，含“正在播放”行）；
+# 栏内 h2 标题顶（栏顶 + 12px 内边距）≈ 播放器顶（±24，“正在播放”行约 28px，
+# 播放器顶含这行，h2 顶不含，所以差值约 -16，容差放宽到 24 才稳）；
 # 选集区首个线路页签顶（行底 + 16px 间距）− 播放器底 ≈ 16（±10）。
-# 上下叠放时两处都会差出几百像素。
+# 上下叠放时两处都会差出几百像素。$dpRect 必须是真播放器（最深的 Group），
+# 用外层容器（约等于视口）量会恒错，见 Find-DeepestPlayerGroup。
 $wr = Get-WindowRect
 $titleEls = Find-Elements -Root $script:Win -NameLike '荒野求生*'
 $h2Rect = $null
@@ -490,7 +550,7 @@ foreach ($e in $titleEls) { $r = Get-ElementRect $e; if ($r -and $r.X -gt ($wr.X
 $tabBtns = Find-Elements -Root $script:Win -NameLike '线路*'
 $tabRect = $null
 if ($tabBtns.Count -ge 1) { $tabRect = Get-ElementRect $tabBtns[0] }
-$topOk = $h2Rect -and [Math]::Abs($h2Rect.Y - $dpRect.Y) -le 16
+$topOk = $h2Rect -and [Math]::Abs($h2Rect.Y - $dpRect.Y) -le 24
 $botGap = $null
 if ($tabRect) { $botGap = $tabRect.Y - ($dpRect.Y + $dpRect.Height) }
 $botOk = ($null -ne $botGap) -and [Math]::Abs($botGap - 16) -le 10
@@ -699,25 +759,22 @@ $switchLog = ''
 Go-Mode 'live' | Out-Null
 Start-Sleep -Seconds 2
 for ($i = 0; $i -lt 10; $i++) {
-  $rows = Find-ChannelRows -Root $script:Win -NameLike '*CCTV*'
+  # 切台行不只盯 CCTV：中继一断 CCTV 全死，行数不够就切不动。
+  $rows = Find-ChannelRows -Root $script:Win -NameLike '*'
   if ($rows.Count -ge 2) {
     $target = $rows[$i % $rows.Count]
-    $before = ''
-    $st = Find-Element -Root $script:Win -Name '正在播放'
-    if ($st) { $before = $st.Current.Name }
+    $beforeStatus = Get-StatusNames
     $targetName = ''
     try { $targetName = $target.Current.Name } catch { }
     Invoke-Element $target | Out-Null
-    # 切台要真换台：等状态文本变成另一台才算成功（只看进程活着不够）。
-    # 首跑 5/10：把每次切台前后的状态名记下来，看没换成的那几次是卡在
-    # “正在重连”（慢台 10 秒不够）还是压根没点上。
-    $changed = Wait-For {
-      $s = Find-Element -Root $script:Win -Name '正在播放'
-      $s -and ($s.Current.Name -ne $before)
-    } -Seconds 10
+    # 切台要真换台：等状态文本变了才算成功（只看进程活着不够）。
+    # 不只认“正在播放”：目标台若死了，状态会变成“正在重连：新台”或
+    # “频道播放失败”，那也是切过去了（源站死不是 app 的错）；没点上时
+    # 状态纹丝不动。首跑 5/10 就是卡在“正在重连”上。
+    $changed = Wait-For { $s = Get-StatusNames; $s -and ($s -ne $beforeStatus) } -Seconds 10
     $afterStatus = Get-StatusNames
     if ($changed) { $switchChanged++ }
-    $switchLog += "sw$i target='$targetName' before='$before' changed=$($null -ne $changed) status='$afterStatus'; "
+    $switchLog += "sw$i target='$targetName' before='$beforeStatus' changed=$($null -ne $changed) status='$afterStatus'; "
     Start-Sleep -Milliseconds 300
   }
   if (-not (Test-ProcessAlive -Id $script:AppPid)) { $switchOk = $false; $switchEv = "died at switch $i"; break }
@@ -748,31 +805,17 @@ if ($SoakMinutes -gt 0) {
   $soakLog = Join-Path $OutDir 'soak.log'
   "soak start $(Get-Date -Format 'HH:mm:ss') pid=$($script:AppPid)" | Out-File $soakLog
   # 浸泡测的是 app 本身，不是源站：先找一条真能播的台。CCTV-1 曾 403 半小时
-  # （源站中断），死守它会白白浪费 30 分钟；按顺序试 CCTV 各台（最多 5 台，
-  # 每台等 30 秒），播起来的才开始计时，死台记进日志。
-  $soakChannel = ''
-  $soakDead = @()
-  $rows = Find-ChannelRows -Root $script:Win -NameLike '*CCTV*'
-  $ordered = @()
-  $seen = @()
-  foreach ($r in $rows) { try { $n = $r.Current.Name; if ($n -like '*CCTV综合*') { $ordered += $r; $seen += $n } } catch { } }
-  foreach ($r in $rows) { try { $n = $r.Current.Name; if ($seen -notcontains $n) { $ordered += $r; $seen += $n } } catch { } }
-  $tried = 0
-  foreach ($row in $ordered) {
-    if ($tried -ge 5 -or $soakChannel) { break }
-    $tried++
-    $nm = ''
-    try { $nm = $row.Current.Name } catch { }
-    Invoke-Element $row | Out-Null
-    $p0 = Wait-PlayerProgress -Seconds 30
-    if ($null -ne $p0 -and $p0 -gt 0) { $soakChannel = $nm; "soak channel '$nm' playing (progress=$p0)" | Out-File $soakLog -Append; break }
-    $st0 = Get-StatusNames
-    $soakDead += $nm
-    "soak channel '$nm' DEAD status='$st0'" | Out-File $soakLog -Append
+  # （源站中断），死守它会白白浪费 30 分钟；中继一断就是一片 410，所以不只
+  # 试 CCTV（CCTV → BBC → 其它行），播起来的才开始计时，死台记进日志。
+  $soakChannel = Find-WorkingLiveChannel -PerRowSeconds 30 -MaxRows 5
+  $soakDead = $script:LastLiveDead
+  if ($soakChannel) {
+    $p0 = Get-PlayerProgress
+    "soak channel '$soakChannel' playing (progress=$p0)" | Out-File $soakLog -Append
+  } else {
+    "soak: NO working channel" | Out-File $soakLog -Append
   }
-  if (-not $soakChannel) {
-    "soak: NO working CCTV channel" | Out-File $soakLog -Append
-  }
+  $switchCount = 0
   $lastProgress = Get-PlayerProgress
   $stuckSamples = 0
   $froze = $false
@@ -806,6 +849,21 @@ if ($SoakMinutes -gt 0) {
     if ($nullStreak -ge 5 -and -not $lostPlayback) {
       $lostPlayback = $true
       "MIN ${m}: PLAYBACK LOST (no progress for 5 min)" | Out-File $soakLog -Append
+    }
+    # 台在浸泡中死了（源站中断）：换一条能播的继续泡（最多 3 次），
+    # 浸泡测的是 app，不是源站；死台记进日志，换台不算失败。
+    # 每 3 分钟没进度才试一次（$nullStreak % 3 -eq 0），免得每分钟都去试。
+    if ($nullStreak -ge 3 -and ($nullStreak % 3 -eq 0) -and $switchCount -lt 3 -and $soakChannel) {
+      $newCh = Find-WorkingLiveChannel -Exclude @($soakChannel) -PerRowSeconds 15 -MaxRows 5
+      if ($newCh) {
+        $switchCount++
+        "MIN ${m}: SWITCHED channel '$soakChannel' -> '$newCh' (old channel died)" | Out-File $soakLog -Append
+        $soakChannel = $newCh
+        $nullStreak = 0; $stuckSamples = 0; $lastProgress = Get-PlayerProgress
+        $soakDead += $script:LastLiveDead
+      } else {
+        "MIN ${m}: no replacement channel found (tried, all dead)" | Out-File $soakLog -Append
+      }
     }
     if ($null -ne $p -and $null -ne $lastProgress -and $p -eq $lastProgress) { $stuckSamples++ } else { $stuckSamples = 0 }
     if ($stuckSamples -ge 2 -and -not $froze) {

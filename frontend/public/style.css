@@ -3366,8 +3366,14 @@ body[data-theme="8bit"],
 .vod-similar .netflix-row.content-card-grid {
   gap: 0.4rem;
   padding: 0.3rem 4% 0.6rem;
+  /* 类似内容卡片收窄到 120px：grid 轨道也按 120px（--content-col 全局是 148px，
+     不改这里轨道会把卡片撑到 ~151px，width: 120px 在 grid 拉伸下会被忽略）。 */
+  --content-col: 120px;
 }
 
 .vod-similar .netflix-row .content-card {
   width: 120px;
+  /* flex 下也按 120px（flex-basis），并封顶，免得被内容或轨道撑大。 */
+  max-width: 120px;
+  flex: 0 0 120px;
 }
