@@ -1,11 +1,16 @@
-// translateSettings.ts — 设置页「字幕翻译」分类的加载、持久化与模型检测。
+// translateSettings.ts — 设置页「字幕翻译」分类的加载、持久化与接口检测。
 //
-// 开关默认关；模型与地址缺失/非法时回退默认。切换时先更新运行时值再持久化，
+// 翻译默认关；服务商缺失/非法时默认 Azure。切换时先更新运行时值再持久化，
 // 持久化失败保留运行时值并把错误交给调用方展示（与 playbackSettings.ts 同一模式）。
 import { ref, type Ref } from 'vue'
-import { normalizeTranslateSettings, type TranslateSettings } from './subtitleTranslate'
+import {
+  normalizeTranslateSettings,
+  type FreeTranslateProvider,
+  type TranslateProvider,
+  type TranslateSettings,
+} from './subtitleTranslate'
 
-export type { TranslateSettings }
+export type { TranslateSettings, TranslateProvider, FreeTranslateProvider }
 
 /** 后端设置接口的最小形状（对应 ShellService 的三个绑定方法）。 */
 export interface TranslateSettingsApi {
@@ -17,10 +22,13 @@ export interface TranslateSettingsApi {
 export interface TranslateSettingsStore {
   settings: Ref<TranslateSettings>
   load: () => Promise<void>
-  setEnabled: (value: boolean) => Promise<void>
-  setModel: (value: string) => Promise<void>
-  setEndpoint: (value: string) => Promise<void>
-  /** checkModel 检测本地是否已拉取当前模型；就绪返回 true，否则 false。 */
+  setProvider: (value: TranslateProvider) => Promise<void>
+  setFreeProvider: (value: FreeTranslateProvider) => Promise<void>
+  setFreeAPIKey: (value: string) => Promise<void>
+  setAzureRegion: (value: string) => Promise<void>
+  setCFAccountID: (value: string) => Promise<void>
+  setCFToken: (value: string) => Promise<void>
+  /** checkModel 检测当前免费接口是否可用；就绪返回 true，否则 false。 */
   checkModel: () => Promise<boolean>
 }
 
@@ -54,16 +62,28 @@ export function createTranslateSettings(
     }
   }
 
-  async function setEnabled(value: boolean): Promise<void> {
-    await persist({ ...settings.value, Enabled: value === true })
+  async function setProvider(value: TranslateProvider): Promise<void> {
+    await persist({ ...settings.value, Provider: value, Enabled: value !== 'off' })
   }
 
-  async function setModel(value: string): Promise<void> {
-    await persist(normalizeTranslateSettings({ ...settings.value, Model: value }))
+  async function setFreeProvider(value: FreeTranslateProvider): Promise<void> {
+    await persist(normalizeTranslateSettings({ ...settings.value, FreeProvider: value }))
   }
 
-  async function setEndpoint(value: string): Promise<void> {
-    await persist(normalizeTranslateSettings({ ...settings.value, Endpoint: value }))
+  async function setFreeAPIKey(value: string): Promise<void> {
+    await persist(normalizeTranslateSettings({ ...settings.value, FreeAPIKey: value }))
+  }
+
+  async function setAzureRegion(value: string): Promise<void> {
+    await persist(normalizeTranslateSettings({ ...settings.value, AzureRegion: value }))
+  }
+
+  async function setCFAccountID(value: string): Promise<void> {
+    await persist(normalizeTranslateSettings({ ...settings.value, CFAccountID: value }))
+  }
+
+  async function setCFToken(value: string): Promise<void> {
+    await persist(normalizeTranslateSettings({ ...settings.value, CFToken: value }))
   }
 
   async function checkModel(): Promise<boolean> {
@@ -76,5 +96,5 @@ export function createTranslateSettings(
     }
   }
 
-  return { settings, load, setEnabled, setModel, setEndpoint, checkModel }
+  return { settings, load, setProvider, setFreeProvider, setFreeAPIKey, setAzureRegion, setCFAccountID, setCFToken, checkModel }
 }

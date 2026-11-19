@@ -23,7 +23,6 @@ describe('netflix palette contract', () => {
   it('keeps the shared layout tokens the old contracts pin', () => {
     expect(stylesheet).toMatch(/--content-col:\s*148px;/)
     expect(stylesheet).toMatch(/--content-gap:\s*0\.75rem;/)
-    expect(stylesheet).toMatch(/--vod-rail:\s*128px;/)
   })
 })
 
@@ -32,9 +31,10 @@ describe('top nav contract', () => {
     expect(app).not.toContain('<aside class="sidebar">')
     expect(app).not.toContain('sidebarCollapsed')
     expect(app).toContain('<header class="topnav"')
-    for (const label of ['首页', '电影', '电视剧', '直播', '我的片单', '媒体库']) {
+    for (const label of ['首页', '电影', '电视', '综艺', '儿童', '直播', '我的片单']) {
       expect(app).toContain(label)
     }
+    expect(app).not.toContain('>媒体库</button>')
     expect(app).toMatch(/aria-label="搜索"/)
     expect(app).toMatch(/aria-label="设置"/)
   })
@@ -46,9 +46,14 @@ describe('top nav contract', () => {
   })
 
   it('movie/drama links jump to the matching real vod category', () => {
+    expect(app).toContain('goTopNavCategory')
+    expect(app).toContain('TOP_NAV_CATEGORIES')
     expect(app).toContain('goVodCategoryByTitle')
-    expect(app).toMatch(/goVodCategoryByTitle\('电影'/)
-    expect(app).toMatch(/goVodCategoryByTitle\('电视剧'/)
+    // 顶部分类与真实分类的映射在 topNav.ts：电视含电视剧/连续剧/剧集别名。
+    const topNav = readFileSync('src/topNav.ts', 'utf8')
+    expect(topNav).toContain("'电视剧'")
+    expect(topNav).toContain("'连续剧'")
+    expect(topNav).toContain("'剧集'")
   })
 })
 

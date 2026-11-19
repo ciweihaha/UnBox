@@ -1,7 +1,7 @@
 // Package shell 的直播实时字幕胶水：把 internal/livesub 的 Manager
 // 暴露给前端，并把开关/模型/窗口持久化到 store.kv（与翻译设置同一风格）。
 //
-// 翻译复用现有的 Ollama 设置（模型/地址/开关），不另起一套；
+// 翻译复用现有的字幕翻译设置（免费接口服务商/Key/开关），不另起一套；
 // 语音识别（Whisper）模型与窗口时长是直播字幕自己的设置。
 // 音频来自前端 Web Audio（抓 <video> 的声音，与画面同步），
 // 后端只负责识别、翻译、推送；因此只在 Web 播放时启动，
@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/unbox/unbox/internal/livesub"
-	"github.com/unbox/unbox/internal/translate"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -144,12 +143,11 @@ func (s *ShellService) StartLiveSubtitles() error {
 
 		root, _ := os.UserConfigDir()
 		dataDir := filepath.Join(root, "unbox", "livesub")
-		tr := s.GetTranslateSettings()
 		mgr := s.newLiveSubManager(livesub.ManagerConfig{
 			WindowSeconds: s.GetLiveSubtitleSettings().WindowSeconds,
 			WhisperModel:  s.GetLiveSubtitleSettings().WhisperModel,
 			DataDir:       dataDir,
-			Translator:    &ollamaTranslator{client: translateClientFor(tr.Endpoint, tr.Model)},
+			Translator:    s.translatorFor(s.GetTranslateSettings()),
 			Emit:          s.emitLiveSubtitle,
 		})
 		s.liveSubMu.Lock()
@@ -343,13 +341,4 @@ func (s *ShellService) emitLiveSubtitle(text string, latency time.Duration) {
 		return
 	}
 	app.Event.Emit("live-subtitle", LiveSubtitleEvent{Text: text, LatencyMs: latency.Milliseconds()})
-}
-
-// ollamaTranslator 把 translate.Client 适配成 livesub.Translator。
-type ollamaTranslator struct {
-	client *translate.Client
-}
-
-func (o *ollamaTranslator) Translate(ctx context.Context, text string) (string, error) {
-	return o.client.Translate(ctx, text)
 }

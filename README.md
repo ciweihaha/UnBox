@@ -183,20 +183,6 @@ Release 挂载产物。
   不建议在桌面端实现。可以先用 AList 挂载这些网盘作为替代。
 - Linux 的 WebKitGTK 无 MSE，HLS / FLV / TS 会自动切到 mpv 播放。
 
-## 💝 捐助
-
-UnBox 是个人「用爱发电」、完全免费的开源项目。如果你觉得它好用，愿意支持后续的开发和维护，欢迎通过 [爱发电](https://afdian.com/a/teaGod) 请我喝杯咖啡 ☕。
-
-应用内「捐助榜单」展示 「爱发电」 支持者（设置页 → 关于 → 捐助榜单）。
-
-或者你也可你通过微信赞赏码捐助。
-
-<p align="center">
-  <img src="build/wechat_sponsor_qrcode.jpg" width="512" height="512" alt="UnBox logo" />
-</p>
-
-每一份支持我都非常感激。当然，不捐助也完全没有关系——软件会一直免费开源下去，你使用它、反馈问题，就已经是最好的支持了。感谢每一位使用 UnBox 的朋友。🙏
-
 ## 📄 License
 
 [MIT](LICENSE)

@@ -1,6 +1,6 @@
 # UnBox 常驻 CI：push 到 master 与 pull_request 时验证 Go 代码。
 #
-# 背景：此前只有 release.yml（v* tag 才构建）和 donors.yml（每日定时），master
+# 背景：此前只有 release.yml（v* tag 才构建），master
 # 的日常提交没有任何自动化验证。本 workflow 补上这个缺口。
 #
 # Linux 系统依赖照搬 release.yml 的 "Install Linux build deps"（Wails v3 的

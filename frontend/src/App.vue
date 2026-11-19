@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
-import { Events, Browser, Dialogs } from '@wailsio/runtime'
-import { ShellService, type SourceInfo, type Section, type VodItem, type VodListPage, type EpisodeInfo, type VodMedia, type SourceRecord, type VodHistoryInfo, type VodFavoriteInfo, type UpdateInfo } from '../bindings/github.com/unbox/unbox/internal/shell'
+import { Events, Browser } from '@wailsio/runtime'
+import { ShellService, type SourceInfo, type Section, type VodItem, type VodListPage, type EpisodeInfo, type VodMedia, type SourceRecord, type VodHistoryInfo, type VodFavoriteInfo, type UpdateInfo, type VodSourceStatus } from '../bindings/github.com/unbox/unbox/internal/shell'
 import PlaybackView, { type PlaybackPlan, type PlaybackState } from './components/PlaybackView.vue'
 import PreloadView from './components/PreloadView.vue'
 import VodDetailHeader from './components/VodDetailHeader.vue'
 import { clampEpisodePage, episodePageIndex, episodePageRanges, paginateEpisodes } from './episodes'
-import { createLibraryThumbPipeline } from './libraryThumb'
 import ContentCardList from './components/ContentCardList.vue'
 import ThemedSelect from './components/ThemedSelect.vue'
 import VodFilterPanel from './components/VodFilterPanel.vue'
@@ -15,7 +14,7 @@ import { contentCardSubtitle, historyCardItem, posterGradient, type ContentCardI
 import { imgError, scrollxEnter, scrollxLeave } from './contentListDom'
 import { createPlaybackSettings, PLAYBACK_SETTING_ITEMS, type PlaybackSettingKey, type PlaybackSettingsApi } from './playbackSettings'
 import { createSubtitleTranslator, type TranslateSubtitleApi } from './subtitleTranslate'
-import { createTranslateSettings, type TranslateSettingsApi } from './translateSettings'
+import { createTranslateSettings, type FreeTranslateProvider, type TranslateProvider, type TranslateSettingsApi } from './translateSettings'
 import { createLiveSubtitleSettings, type LiveSubtitleSettingsApi } from './liveSubtitleSettings'
 import { VodAutomation, nextEpisodeInSource, sameNameEpisodeOnSource, type VodAutomationHost } from './playbackAutomation'
 import { resolveSkipAction, type SkipRuntime, type VodSkipMarks } from './vodSkip'
@@ -26,27 +25,15 @@ import { buildVodSourceDeadInfo, vodSourceDeadBackLabel, vodSourceDeadBackTarget
 import { appendVodItems, hasNextVodPage, nextVodPage } from './vodPagination'
 import { countLeadingStrong, sortVodSearchResults } from './vodSearchRelevance'
 import { appliedFilter, availableFilterGroups, hasActiveFilter, initialSelections } from './vodFilters'
-import { donationView, formatUpdatedAt, normalizeLeaderboard, type DonationStatus } from './donation'
 import { certErrorHost } from './tlsExempt'
+import { TOP_NAV_CATEGORIES, topNavKeyForCategory, type TopNavCategory } from './topNav'
+import { isValidCfVodURL, vodSourceKindLabel } from './vodSource'
 import DOMPurify from 'dompurify'
 
-// 爱发电赞助主页
-const DONATE_URL = 'https://afdian.com/a/teaGod'
-const DEFAULT_DONOR_AVATAR = '/appicon.png'
 
 interface ChannelInfo { ID: string; Name: string; Group: string; Logo: string; Favorited: boolean }
 interface Progress { Stage: string; Message: string; Done: number; Total: number }
-interface LibraryDir { Path: string; AddedAt: number }
-interface LibraryItem { Path: string; Name: string; Dir: string; Ext: string; Size: number; MTime: number; Poster: string }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ''
-  const chunkSize = 0x8000
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
-  }
-  return btoa(binary)
-}
 
 const platform = ref('…')
 const playerReady = ref(false)
@@ -70,7 +57,7 @@ const errMsg = ref('')
 const importProgress = ref<Progress | null>(null)
 const importingKind = ref<'' | 'vod' | 'live'>('')
 const importing = computed(() => importingKind.value !== '')
-const mode = ref<'home' | 'vod' | 'live' | 'library' | 'search' | 'favorites' | 'settings'>('home')
+const mode = ref<'home' | 'vod' | 'live' | 'search' | 'favorites' | 'settings'>('home')
 const sources = ref<SourceInfo[]>([])
 const activeSite = ref('')
 const activeLine = ref('')
@@ -159,29 +146,7 @@ const showVodHistory = ref(false)
 const showLiveHistory = ref(false)
 const homeHistory = ref<VodHistoryInfo[]>([])
 const currentVod = ref<{ site: string; vodID: string } | null>(null)
-const currentLibraryPath = ref('')
 const pendingSeek = ref(0)
-const libraryDirs = ref<LibraryDir[]>([])
-const libraryItems = ref<LibraryItem[]>([])
-const libraryAddingDir = ref(false)
-const libraryNewDir = ref('')
-const libraryScanning = ref(false)
-const libraryMessage = ref('')
-const libraryError = ref('')
-const libraryUnavailable = ref<string[]>([])
-const libraryThumbPipeline = createLibraryThumbPipeline({
-  EnsureThumb: async (path, mtime) => await ShellService.EnsureThumb(path, mtime),
-  SaveThumb: async (path, mtime, jpeg) => await ShellService.SaveThumb(path, mtime, bytesToBase64(jpeg)),
-  GenerateThumbMpv: async (path, mtime) => await ShellService.GenerateThumbMpv(path, mtime),
-}, {
-  onPoster: (item) => {
-    homeHistory.value = homeHistory.value.map(history =>
-      history.Site === 'local' && history.VodID === item.Path
-        ? { ...history, VodLogo: item.Poster }
-        : history,
-    )
-  },
-})
 // 延迟续播目标：进详情时记下上次看的集数与进度，等用户点播放才套用。
 const vodResume = ref<{ EpID: string; Progress: number } | null>(null)
 // 详情加载中标题：详情请求还在跑时非空，底部提示条显示「正在加载《…》…」，
@@ -217,9 +182,7 @@ async function exemptCertHost(host: string) {
     handleError(e)
   }
 }
-const logs = ref('')
-const showLogs = ref(false)
-const copyMsg = ref('')
+
 const searchProgress = ref<Progress | null>(null)
 const searchThreads = ref(1)
 const searchCacheTTL = ref(30)
@@ -239,13 +202,6 @@ const currentVersion = ref('')
 const internalVersion = ref('')
 const showAbout = ref(false)
 const showDisclaimer = ref(false)
-const showOpenSource = ref(false)
-const showDonations = ref(false)
-const donationLeaderboard = ref(normalizeLeaderboard(null))
-const donationStatus = ref<DonationStatus>('idle')
-const donationViewState = computed(() => donationView(donationStatus.value, donationLeaderboard.value.Donors))
-const donationUpdatedText = computed(() => formatUpdatedAt(donationLeaderboard.value.UpdatedAt))
-const catsCollapsed = ref(false)
 // 详情简介展开态：默认限 3 行，点「展开简介」放开。
 const descExpanded = ref(false)
 // 换一部剧时简介回到默认的 3 行收起态。
@@ -272,7 +228,8 @@ function togglePlaybackSetting(key: PlaybackSettingKey, value: boolean) {
   void playbackSettingsStore.set(key, value)
 }
 
-// 字幕翻译：本地小模型英译中，默认关；三个播放器共用同一个翻译器（缓存共享）。
+// 字幕翻译：英译中，默认关；只走免费接口（微软 Azure / 谷歌 / Cloudflare）。
+// 失败时显示原文、不挡播放；两个播放器共用同一个翻译器（缓存共享）。
 const translateSettingsStore = createTranslateSettings(
   ShellService as unknown as TranslateSettingsApi,
   (e) => handleError(e),
@@ -284,24 +241,35 @@ const subtitleTranslator = createSubtitleTranslator(
 function translateSubtitleText(text: string): Promise<string> {
   return subtitleTranslator.translate(text)
 }
-function toggleTranslateSetting(value: boolean) {
-  void translateSettingsStore.setEnabled(value)
+function setTranslateProvider(provider: TranslateProvider) {
+  void translateSettingsStore.setProvider(provider)
 }
-const translateModel = computed({
-  get: () => translateSettings.value.Model,
-  set: (v: string) => { void translateSettingsStore.setModel(v) },
+function setTranslateFreeProvider(provider: FreeTranslateProvider) {
+  void translateSettingsStore.setFreeProvider(provider)
+}
+const translateFreeAPIKey = computed({
+  get: () => translateSettings.value.FreeAPIKey,
+  set: (v: string) => { void translateSettingsStore.setFreeAPIKey(v) },
 })
-const translateEndpoint = computed({
-  get: () => translateSettings.value.Endpoint,
-  set: (v: string) => { void translateSettingsStore.setEndpoint(v) },
+const translateAzureRegion = computed({
+  get: () => translateSettings.value.AzureRegion,
+  set: (v: string) => { void translateSettingsStore.setAzureRegion(v) },
+})
+const translateCFAccountID = computed({
+  get: () => translateSettings.value.CFAccountID,
+  set: (v: string) => { void translateSettingsStore.setCFAccountID(v) },
+})
+const translateCFToken = computed({
+  get: () => translateSettings.value.CFToken,
+  set: (v: string) => { void translateSettingsStore.setCFToken(v) },
 })
 const translateModelMsg = ref('')
 async function checkTranslateModel() {
   const ok = await translateSettingsStore.checkModel()
-  translateModelMsg.value = ok ? '本地模型就绪，可以开字幕翻译' : ''
+  translateModelMsg.value = ok ? '免费接口就绪，可以开字幕翻译' : ''
 }
 
-// 直播实时字幕：Whisper 听写英文 + 同一个 Ollama 模型翻中文，默认关。
+// 直播实时字幕：Whisper 听写英文 + 字幕翻译设置的免费接口翻中文，默认关。
 // 后端在切台时自动启停；前端只负责收字幕事件、抓音频、清残留。
 const liveSubtitleSettingsStore = createLiveSubtitleSettings(
   ShellService as unknown as LiveSubtitleSettingsApi,
@@ -351,7 +319,6 @@ const activePlaybackPlan = computed(() => playbackPlanForMode(mode.value, {
 const livePagePlaybackPlan = computed(() => mode.value === 'live' && playbackOwner.value === 'live' ? livePlaybackPlan.value : null)
 const vodPagePlaybackPlan = computed(() => mode.value === 'vod' && vodView.value === 'detail' && playbackOwner.value === 'vod' ? vodPlaybackPlan.value : null)
 const showVodNoResults = computed(() => shouldShowVodNoResults(vodQuery.value, completedSearchQuery.value, searching.value, vodSearchItems.value.length))
-const libraryPagePlaybackPlan = computed(() => mode.value === 'library' && playbackOwner.value === 'vod' ? vodPlaybackPlan.value : null)
 
 function resetEpisodePage() {
   episodePage.value = 0
@@ -417,10 +384,9 @@ function siteName(site: string) {
   return sources.value.find(s => s.ID === site)?.Name ?? site
 }
 
-// openVodSourceDead 详情请求失败时弹「无法访问点播源」弹窗。错误仍写后端日志，
-// 但不进底部红条——站点连不上是常态，不是程序故障。
+// openVodSourceDead 详情请求失败时弹「无法访问点播源」弹窗。
+// 不进底部红条——站点连不上是常态，不是程序故障。
 function openVodSourceDead(site: string, vodTitle: string, origin: VodDetailOrigin, e: unknown) {
-  ShellService.LogError(String(e)).catch(() => {})
   vodSourceDead.value = { info: buildVodSourceDeadInfo(siteName(site), vodTitle, e), origin }
 }
 
@@ -461,20 +427,23 @@ function onHomeScroll(event: Event) {
   navScrolled.value = (event.target as HTMLElement).scrollTop > 24
 }
 
-// 顶部导航高亮：点播页按当前分类名归属到电影 / 电视剧。
+// 顶部导航高亮：点播页按当前分类名归属到电影 / 电视 / 综艺 / 儿童。
 const navActive = computed(() => {
   if (mode.value === 'home') return 'home'
   if (mode.value === 'live') return 'live'
   if (mode.value === 'favorites') return 'favorites'
-  if (mode.value === 'library') return 'library'
   if (mode.value === 'vod') {
     const title = vodCategories.value.find(c => c.ID === vodActiveCat.value)?.Title ?? ''
-    if (title.includes('电影')) return 'movies'
-    if (title.includes('电视') || title.includes('连续剧') || title.includes('剧集')) return 'tv'
-    return 'vod'
+    return topNavKeyForCategory(title)
   }
   return ''
 })
+
+// 顶部导航的点播分类入口：按分类名找真实分类（首个匹配词为主名，其余为别名）；
+// 找不到就只进点播列表，不编分类。
+async function goTopNavCategory(cat: TopNavCategory) {
+  await goVodCategoryByTitle(cat.search[0], ...cat.search.slice(1))
+}
 
 // 首页海报行只取点播列表（vodListItems），不用 visibleVodItems：
 // 用户刚搜完回首页时 visibleVodItems 是搜索结果，行会错显示搜索结果。
@@ -571,7 +540,6 @@ const activeVodCatObj = computed(() => vodCategories.value.find(c => c.ID === vo
 // 首页分类栏只留电影 / 电视剧 / 动漫 / 综艺四项（第 6 项）：分类是源站
 // 下发的（vodCategories），各源命名不一（电影片、连续剧、剧集、动画……），
 // 按名包含匹配；每组只取第一个命中的分类，避免同一类出两颗芯片。
-// 点播页自己的类目栏（.cats-list）仍用全量 vodCategories，不动。
 const homeMainCatGroups = [
   ['电影'],
   ['电视剧', '连续剧', '剧集'],
@@ -592,44 +560,38 @@ async function refresh() {
     currentVersion.value = await ShellService.CurrentVersion()
     internalVersion.value = await ShellService.InternalVersion()
     await refreshMpvStatus()
-    await initializeHomeState(loadLibrary, refreshHome)
+    await initializeHomeState(refreshHome)
   } catch (e) {
     handleError(e)
   }
 }
 
-// handleError 统一处理前端错误：回显 + 写入后端日志（使 RuntimeError 进入「查看日志」）。
+// handleError 统一处理前端错误：底部错误条回显。
 function handleError(e: unknown) {
-  const msg = String(e)
-  errMsg.value = msg
-  ShellService.LogError(msg).catch(() => {})
+  errMsg.value = String(e)
 }
 
 // notePlaybackFailure 播放失败时的共同处理：如果这次失败是因为缺 mpv，
 // 就打开安装提示。
 //
-// 本地媒体库、HEVC 的 HLS、RTMP 会**直接**路由到 mpv，不经过 Web，因此不会
+// HEVC 的 HLS、RTMP 会**直接**路由到 mpv，不经过 Web，因此不会
 // 触发 Web→mpv 的降级回调；只靠降级置位的话，这类失败永远不会提示安装 mpv。
 function notePlaybackFailure(message: string) {
   if (isMpvUnavailableError(message)) mpvNeeded.value = true
 }
 
-// setVodPlaybackError 记下播放失败原因，界面回显之外再写入后端日志。
-// 播放失败（尤其是 mpv 报错）此前只活在界面提示里，用户没法把「查看日志」
-// 发给我们，只能截图——而这恰恰是排查播放问题时最需要的信息。
+// setVodPlaybackError 记下播放失败原因，界面回显。
 function setVodPlaybackError(message: string) {
   vodPlaybackError.value = message
   if (!message) return
   notePlaybackFailure(message)
-  ShellService.LogError(message).catch(() => {})
 }
 
-// setLivePlaybackError 直播同款：界面回显（播放器下方）+ 写入后端日志。
+// setLivePlaybackError 直播同款：界面回显（播放器下方）。
 function setLivePlaybackError(message: string) {
   livePlaybackError.value = message
   if (!message) return
   notePlaybackFailure(message)
-  ShellService.LogError(message).catch(() => {})
 }
 
 async function openAbout() {
@@ -637,31 +599,7 @@ async function openAbout() {
   showAbout.value = true
 }
 
-// openDonations 只在用户打开榜单时拉取；失败不弹全局错误，由弹窗正文提示重试，
-// 且保留上一次成功的数据，避免回退成空态或丢掉已经看到的榜单。
-async function openDonations() {
-  showDonations.value = true
-  donationStatus.value = 'loading'
-  try {
-    donationLeaderboard.value = normalizeLeaderboard(await ShellService.GetDonationLeaderboard())
-    donationStatus.value = 'ready'
-  } catch {
-    donationStatus.value = 'failed'
-  }
-}
-
-// donorAvatarError 首次失败切换到默认头像，默认头像仍失败时隐藏，避免浏览器碎图。
-function donorAvatarError(event: Event) {
-  const image = event.currentTarget as HTMLImageElement
-  if (image.dataset.fallback === 'true') {
-    image.hidden = true
-    return
-  }
-  image.dataset.fallback = 'true'
-  image.src = DEFAULT_DONOR_AVATAR
-}
-
-// openURL 用系统默认浏览器打开外部链接（源码 / 捐助 / 下载新版本）。
+// openURL 用系统默认浏览器打开外部链接（下载新版本）。
 function openURL(url: string) {
   Browser.OpenURL(url).catch(() => {})
 }
@@ -690,7 +628,7 @@ async function recheckMpv() {
   } catch (e) { handleError(e) }
 }
 
-async function switchMode(m: 'home' | 'vod' | 'live' | 'library' | 'search' | 'favorites' | 'settings') {
+async function switchMode(m: 'home' | 'vod' | 'live' | 'search' | 'favorites' | 'settings') {
   if (m !== 'search' && searching.value) await invalidateSearch()
   if (m !== 'live' && activePlayback.value?.scope === 'live') await stopPlayback('live')
   if (m !== mode.value && activePlayback.value?.scope === 'vod') await stopPlayback('vod')
@@ -713,18 +651,14 @@ async function switchMode(m: 'home' | 'vod' | 'live' | 'library' | 'search' | 'f
     await loadVodFavorites()
   }
   else if (m === 'home') { navScrolled.value = false; await refreshHome() }
-  else if (m === 'library') { await loadLibrary(); await refreshHome() }
-  else if (m === 'settings') { await reloadSourceHistory(); await reloadInsecureTLSHosts(); await refreshLogs(); await loadSearchThreads(); await loadSearchCacheTTL(); await playbackSettingsStore.load(); await translateSettingsStore.load(); await liveSubtitleSettingsStore.load() }
+  else if (m === 'settings') { await reloadSourceHistory(); await reloadInsecureTLSHosts(); await loadVodSourceStatus(); await loadSearchThreads(); await loadSearchCacheTTL(); await playbackSettingsStore.load(); await translateSettingsStore.load(); await liveSubtitleSettingsStore.load() }
 }
 
 async function refreshHome() {
   try {
+    // 本地媒体库已删除：过去的本地观看记录播不了，不再进「继续观看」。
     const history = (await ShellService.ListVodHistory()) ?? []
-    const posters = new Map(libraryItems.value.map(item => [item.Path, item.Poster]))
-    homeHistory.value = history.map(item => {
-      const poster = item.Site === 'local' ? posters.get(item.VodID) : ''
-      return poster ? { ...item, VodLogo: poster } : item
-    })
+    homeHistory.value = history.filter(item => item.Site !== 'local')
   } catch (e) { handleError(e) }
   // 首页海报行的数据预取：只在点播分类从未加载过时拉一次（复用点播页自己
   // 的加载逻辑，不新增取数路径）；源站连不上时不把错误顶到首页——分类页
@@ -736,81 +670,6 @@ async function refreshHome() {
   }
   // 我的片单行取真实收藏：本地库查询，失败时 loadVodFavorites 自己报错。
   await loadVodFavorites()
-}
-
-async function loadLibrary() {
-  libraryError.value = ''
-  try {
-    libraryDirs.value = (await ShellService.ListLibraryDirs()) ?? []
-    libraryItems.value = (await ShellService.ListLibrary()) ?? []
-    void libraryThumbPipeline.ensureAll(libraryItems.value)
-  } catch (e) {
-    libraryError.value = String(e)
-    handleError(e)
-  }
-}
-
-async function addLibraryDir() {
-  libraryAddingDir.value = true
-  libraryError.value = ''
-}
-
-async function confirmLibraryDir() {
-  const path = libraryNewDir.value.trim()
-  if (!path) return
-  try {
-    await ShellService.AddLibraryDir(path)
-    libraryNewDir.value = ''
-    libraryAddingDir.value = false
-    await loadLibrary()
-  } catch (e) {
-    libraryError.value = String(e)
-    handleError(e)
-  }
-}
-
-// 走各平台原生目录选择器（Windows 资源管理器 / macOS NSOpenPanel / Linux GTK），
-// 选完填入输入框：与手动录入殊途同归走 confirmLibraryDir，两种方式并存。
-async function browseLibraryDir() {
-  const picked = await Dialogs.OpenFile({
-    CanChooseDirectories: true,
-    CanChooseFiles: false,
-    AllowsMultipleSelection: false,
-    Title: '选择媒体目录',
-  })
-  if (picked) libraryNewDir.value = picked
-}
-
-async function removeLibraryDir(path: string) {
-  try {
-    await ShellService.RemoveLibraryDir(path)
-    await loadLibrary()
-  } catch (e) {
-    libraryError.value = String(e)
-    handleError(e)
-  }
-}
-
-async function rescanLibrary() {
-  if (libraryScanning.value) return
-  libraryScanning.value = true
-  libraryError.value = ''
-  libraryMessage.value = ''
-  try {
-    const result = await ShellService.RescanLibrary()
-    libraryUnavailable.value = result.Unavailable ?? []
-    libraryMessage.value = `扫描完成：新增 ${result.Added}，移除 ${result.Removed}`
-    await loadLibrary()
-  } catch (e) {
-    libraryError.value = String(e)
-    handleError(e)
-  } finally {
-    libraryScanning.value = false
-  }
-}
-
-function libraryProgress(path: string) {
-  return homeHistory.value.find(h => h.Site === 'local' && h.VodID === path)
 }
 
 async function loadVodSearchHistory() {
@@ -941,11 +800,6 @@ function fmtProgress(sec: number) {
 
 async function resumeVod(h: VodHistoryInfo) {
   errMsg.value = ''
-  if (h.Site === 'local') {
-    await switchMode('library')
-    await playLibraryItem(h.VodID)
-    return
-  }
   if (vodDetailLoading.value) return // 上一个详情请求还没回，忽略连点
   vodSourceDead.value = null
   vodDetailLoading.value = h.VodTitle
@@ -969,39 +823,6 @@ async function resumeVod(h: VodHistoryInfo) {
     openVodSourceDead(h.Site, h.VodTitle, 'home', e)
   } finally {
     vodDetailLoading.value = ''
-  }
-}
-
-async function playLibraryItem(path: string) {
-  errMsg.value = ''
-  await stopPlayback('live')
-  const token = beginPlayback('vod')
-  vodPlaybackPlan.value = null
-  vodPlaybackToken.value = 0
-  vodPlaybackStatus.value = 'preparing'
-  vodPlaybackError.value = ''
-  currentVod.value = null
-  currentLibraryPath.value = path
-  lastProgressSave = 0
-  const history = libraryProgress(path)
-  // 看完的本地视频下次打开从头播，而不是一打开就走到结尾。
-  pendingSeek.value = resumeSeekFor(history?.Progress ?? 0, history?.Duration ?? 0)
-  vodNowPlaying.value = libraryItems.value.find(item => item.Path === path)?.Name ?? path
-  try {
-    const plan = await ShellService.PrepareLibrary(path) as unknown as PlaybackPlan
-    if (!isCurrentPlayback('vod', token)) { await pauseStalePlayback(token); return }
-    vodPlaybackPlan.value = plan
-    vodPlaybackToken.value = token
-    vodPlaybackStatus.value = 'playing'
-    await ShellService.RecordLibraryProgress(path, pendingSeek.value, history?.Duration ?? 0)
-    await refreshHome()
-  } catch (e) {
-    if (isCurrentPlayback('vod', token)) {
-      vodPlaybackPlan.value = null
-      vodPlaybackToken.value = 0
-      vodPlaybackStatus.value = 'error'
-      setVodPlaybackError(String(e))
-    }
   }
 }
 
@@ -1054,6 +875,69 @@ async function reloadSourceHistory() {
     vodSourceUrl.value = vodSources.value[0]?.Ref ?? ''
     liveSourceUrl.value = liveSources.value[0]?.Ref ?? ''
   } catch (e) { handleError(e) }
+}
+
+// ---- 设置：点播源来源（本地 / Cloudflare）----
+// 后端方法见 internal/shell/vodsource.go：SetCloudflareVodURL、
+// RefreshCloudflareVodSource、UseLocalVodSource、GetVodSourceStatus。
+const vodSourceStatus = ref<VodSourceStatus | null>(null)
+const cfVodUrl = ref('')
+
+async function loadVodSourceStatus() {
+  try {
+    vodSourceStatus.value = await ShellService.GetVodSourceStatus()
+    if (vodSourceStatus.value?.CloudflareURL) cfVodUrl.value = vodSourceStatus.value.CloudflareURL
+  } catch (e) { handleError(e) }
+}
+
+async function saveCfVodUrl() {
+  const url = cfVodUrl.value.trim()
+  if (!isValidCfVodURL(url) || importing.value) return
+  errMsg.value = ''; importSummary.value = ''; importProgress.value = null
+  importingKind.value = 'vod'
+  try {
+    const r = await ShellService.SetCloudflareVodURL(url)
+    importSummary.value = `Cloudflare 点播源拉取成功：${r.Sites} 个站点`
+    await loadVodSourceStatus()
+    await reloadSourceHistory()
+    activeSite.value = ''
+    await refreshVod()
+  } catch (e) {
+    handleError(e)
+  }
+  finally { importingKind.value = ''; importProgress.value = null }
+}
+
+async function refreshCfVodSource() {
+  if (importing.value) return
+  errMsg.value = ''; importSummary.value = ''; importProgress.value = null
+  importingKind.value = 'vod'
+  try {
+    const r = await ShellService.RefreshCloudflareVodSource()
+    importSummary.value = `Cloudflare 点播源刷新成功：${r.Sites} 个站点`
+    await loadVodSourceStatus()
+    await reloadSourceHistory()
+    activeSite.value = ''
+    await refreshVod()
+  } catch (e) {
+    handleError(e)
+  }
+  finally { importingKind.value = ''; importProgress.value = null }
+}
+
+async function useLocalVodSource() {
+  if (importing.value) return
+  errMsg.value = ''; importSummary.value = ''
+  try {
+    const r = await ShellService.UseLocalVodSource()
+    importSummary.value = `已切回本地源：${r.Sites} 个站点`
+    await loadVodSourceStatus()
+    await reloadSourceHistory()
+    activeSite.value = ''
+    await refreshVod()
+  } catch (e) {
+    handleError(e)
+  }
 }
 
 // ---- 设置：证书豁免 ----
@@ -1687,7 +1571,7 @@ async function fallbackToMpv(scope: PlaybackScope, id: string, token: number, po
       scope,
       async () => await ShellService.FallbackToMPVWithToken(id, token, start) as unknown as PlaybackPlan,
       () => isCurrentPlayback(scope, token) &&
-        (scope === 'live' ? mode.value === 'live' : (mode.value === 'vod' && vodView.value === 'detail') || mode.value === 'library'),
+        (scope === 'live' ? mode.value === 'live' : (mode.value === 'vod' && vodView.value === 'detail')),
       (target, plan) => {
         if (target === 'live') {
           livePlaybackPlan.value = plan
@@ -1738,7 +1622,6 @@ async function stopPlayback(scope: PlaybackScope) {
     vodPlaybackToken.value = 0
     vodNowPlaying.value = ''
     currentVod.value = null
-    currentLibraryPath.value = ''
     vodPlaybackPosition.value = 0
     vodPlaybackStatus.value = 'idle'
     vodPlaybackError.value = ''
@@ -1942,58 +1825,12 @@ async function onVodProgress(token: number, time: number, duration: number) {
   catch { /* 进度保存失败不阻断 */ }
 }
 
-async function onLibraryProgress(token: number, time: number, duration: number) {
-  if (!isCurrentPlayback('vod', token) || mode.value !== 'library' || !currentLibraryPath.value) return
-  const now = Date.now()
-  if (now - lastProgressSave < 10000) return
-  lastProgressSave = now
-  try {
-    await ShellService.RecordLibraryProgress(currentLibraryPath.value, time, duration)
-    await refreshHome()
-  } catch { /* 进度保存失败不阻断播放 */ }
-}
-
-async function refreshLogs() {
-  try { logs.value = await ShellService.GetLogs() } catch (e) { handleError(e) }
-}
-
-async function openLogs() {
-  copyMsg.value = ''
-  await refreshLogs()
-  showLogs.value = true
-}
-
-async function copyLogs() {
-  const text = logs.value
-  if (!text) return
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text)
-    } else {
-      const ta = document.createElement('textarea')
-      ta.value = text
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      document.execCommand('copy')
-      document.body.removeChild(ta)
-    }
-    copyMsg.value = '已复制到剪贴板'
-  } catch (e) {
-    errMsg.value = '复制失败：' + String(e)
-  }
-}
-
 async function pollMpvProgress() {
   const token = vodPlaybackToken.value
   if (!isCurrentPlayback('vod', token) || !shouldRecordVodProgress(mode.value, vodView.value) || activePlaybackPlan.value?.Backend !== 'mpv') return
   try {
     const pos = await ShellService.Position()
-    if (mode.value === 'library' && currentLibraryPath.value) {
-      await ShellService.RecordLibraryProgress(currentLibraryPath.value, pos, 0)
-      await refreshHome()
-    } else if (currentVod.value) {
+    if (currentVod.value) {
       await ShellService.UpdateVodProgress(currentVod.value.site, currentVod.value.vodID, pos, 0)
     }
   } catch { /* 忽略 */ }
@@ -2140,11 +1977,9 @@ onBeforeUnmount(() => {
 
       <nav class="nav-links" aria-label="主导航">
         <button :class="{ active: navActive === 'home' }" @click="switchMode('home')">首页</button>
-        <button :class="{ active: navActive === 'movies' }" @click="goVodCategoryByTitle('电影')">电影</button>
-        <button :class="{ active: navActive === 'tv' }" @click="goVodCategoryByTitle('电视剧', '连续剧', '剧集')">电视剧</button>
+        <button v-for="cat in TOP_NAV_CATEGORIES" :key="cat.key" :class="{ active: navActive === cat.key }" @click="goTopNavCategory(cat)">{{ cat.label }}</button>
         <button :class="{ active: navActive === 'live' }" @click="switchMode('live')">直播</button>
         <button :class="{ active: navActive === 'favorites' }" @click="switchMode('favorites')">我的片单</button>
-        <button :class="{ active: navActive === 'library' }" @click="switchMode('library')">媒体库</button>
       </nav>
 
       <div class="nav-tools">
@@ -2343,52 +2178,6 @@ onBeforeUnmount(() => {
       <div v-if="liveToast" class="app-toast" role="status" aria-live="polite">{{ liveToast }}</div>
     </section>
 
-    <!-- 媒体库 -->
-    <section v-if="mode === 'library'" class="library-page">
-      <div class="library-toolbar">
-        <h2>媒体库</h2>
-        <ul class="library-dirs">
-          <li v-for="dir in libraryDirs" :key="dir.Path">
-            <span class="scrollx" @mouseenter="scrollxEnter" @mouseleave="scrollxLeave"><span class="scrollx-inner">{{ dir.Path }}</span></span>
-            <button type="button" class="row-delete" title="移除目录" @click="removeLibraryDir(dir.Path)">移除</button>
-          </li>
-        </ul>
-        <div class="library-actions">
-          <button type="button" @click="addLibraryDir">添加目录</button>
-          <button type="button" :disabled="libraryScanning" @click="rescanLibrary">{{ libraryScanning ? '扫描中…' : '重新扫描' }}</button>
-        </div>
-      </div>
-      <form v-if="libraryAddingDir" class="library-add" @submit.prevent="confirmLibraryDir">
-        <div class="library-add-input">
-          <input v-model="libraryNewDir" autofocus placeholder="输入目录绝对路径" />
-          <button type="button" class="library-add-browse" title="浏览目录…" @click="browseLibraryDir">浏览</button>
-        </div>
-        <button type="submit">确定</button>
-        <button type="button" @click="libraryAddingDir = false; libraryNewDir = ''">取消</button>
-      </form>
-      <div class="library-body">
-        <aside class="library-player">
-          <p v-if="vodNowPlaying" class="now">正在播放：{{ vodNowPlaying }}</p>
-          <p v-if="vodPlaybackStatus === 'preparing'" class="playback-status" aria-live="polite">正在加载本地视频…</p>
-          <p v-if="vodPlaybackStatus === 'error'" class="playback-error" aria-live="assertive">本地视频播放失败：{{ vodPlaybackError }}</p>
-          <PlaybackView :plan="libraryPagePlaybackPlan" :seek-to="pendingSeek" empty-text="点右侧视频开始播放" :translate-enabled="translateSettings.Enabled" :translate-text="translateSubtitleText" @fallback="(id, position) => fallbackToMpv('vod', id, vodPlaybackToken, position)" @progress="(time, duration) => onLibraryProgress(vodPlaybackToken, time, duration)" />
-        </aside>
-        <div class="library-side">
-          <div v-if="libraryMessage" class="ok">{{ libraryMessage }}</div>
-          <div v-if="libraryError" class="src-import-error"><span>{{ libraryError }}</span><button type="button" title="关闭" @click="libraryError = ''">✕</button></div>
-          <div v-if="libraryUnavailable.length" class="library-warning">无法访问：{{ libraryUnavailable.join('、') }}</div>
-          <p v-if="!libraryItems.length" class="home-empty">尚未扫描到视频</p>
-          <ul v-else class="library-list">
-            <li v-for="item in libraryItems" :key="item.Path" @click="playLibraryItem(item.Path)">
-              <img v-if="item.Poster" :src="item.Poster" class="thumb" loading="lazy" alt="" @error="imgError" />
-              <span class="library-item-info"><strong class="scrollx" @mouseenter="scrollxEnter" @mouseleave="scrollxLeave"><span class="scrollx-inner">{{ item.Name }}</span></strong><small class="scrollx" @mouseenter="scrollxEnter" @mouseleave="scrollxLeave"><span class="scrollx-inner">{{ item.Dir }}</span></small></span>
-              <span v-if="libraryProgress(item.Path)?.Progress" class="library-progress">看到 {{ fmtProgress(libraryProgress(item.Path)!.Progress) }}</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
     <!-- 点播 -->
     <section v-if="mode === 'vod'" class="vod">
       <div v-if="vodView === 'list'" class="vod-toolbar">
@@ -2406,18 +2195,7 @@ onBeforeUnmount(() => {
       <!-- 顶部只留状态；完整错误文本统一在底部错误条展示一次，避免上下重复。 -->
       <p v-else-if="vodCategoryError" class="vod-state vod-state-error" aria-live="assertive">分类加载失败</p>
 
-      <div class="vod-layout" :class="{ 'cats-collapsed': catsCollapsed, 'without-cats': vodView !== 'list' }">
-        <aside v-if="vodView === 'list'" class="vod-cats" :class="{ collapsed: catsCollapsed }">
-          <div class="cats-head">
-            <span class="cats-title">类目</span>
-            <button class="cats-toggle" :title="catsCollapsed ? '展开类目' : '收起类目'" @click="catsCollapsed = !catsCollapsed">{{ catsCollapsed ? '»' : '«' }}</button>
-          </div>
-          <div class="cats-list">
-            <button v-for="c in vodCategories" :key="c.ID" :class="{ active: c.ID === vodActiveCat }"
-                    @click="selectVodCategory(c.ID)">{{ c.Title }}</button>
-          </div>
-        </aside>
-
+      <div class="vod-layout">
         <section class="vod-main">
           <!-- 点播列表三态都在内容区内明示，不再静默空白：加载中显示进度，
                失败显示真实原因并给重试入口，空结果也给重试（源站可能刚恢复）。 -->
@@ -2478,6 +2256,17 @@ onBeforeUnmount(() => {
             </span>
           </div>
         </form>
+        <div class="src-add">
+          <label>Cloudflare 点播源 <input v-model="cfVodUrl" type="text" placeholder="https://live.ciweihaha.win/vod.json" :disabled="importing" /></label>
+          <button type="button" :disabled="importing || !isValidCfVodURL(cfVodUrl)" @click="saveCfVodUrl">保存并拉取</button>
+          <button type="button" :disabled="importing" @click="refreshCfVodSource">刷新</button>
+        </div>
+        <p class="home-empty">填 Cloudflare 地址（如 live.ciweihaha.win/vod.json 或 ysp.ciweihaha.win/agg），点保存后直接拉取；随时点刷新重拉，不用改本地文件。</p>
+        <p v-if="vodSourceStatus" class="home-empty">当前来源：{{ vodSourceKindLabel(vodSourceStatus.Kind) }} · {{ vodSourceStatus.Sites }} 个站点<span v-if="vodSourceStatus.Kind === 'cloudflare' && vodSourceStatus.UpdatedAt"> · 上次拉取 {{ new Date(vodSourceStatus.UpdatedAt * 1000).toLocaleString() }}</span></p>
+        <div class="src-add">
+          <button type="button" :disabled="importing || !vodSourceStatus?.LocalRef" @click="useLocalVodSource">用本地源</button>
+          <button type="button" :disabled="importing || !vodSourceStatus?.CloudflareURL" @click="refreshCfVodSource">用 Cloudflare 源</button>
+        </div>
       </section>
 
       <section class="src-section">
@@ -2547,21 +2336,37 @@ onBeforeUnmount(() => {
 
       <section class="src-section">
         <h3>字幕翻译</h3>
-        <p class="home-empty">本地小模型把英文字幕实时翻成中文（需本机装 Ollama 并拉取模型；失败时显示原文，不影响播放）。</p>
+        <p class="home-empty">把英文字幕实时翻成中文（接口失败时显示原文，不影响播放）。免费接口要自己去微软 / 谷歌免费开个 Key 贴进来，不收费；也可以用 Cloudflare 免费层。</p>
         <div class="settings-personalize">
-          <button type="button" class="settings-choice" :class="{ active: translateSettings.Enabled }" title="开启后，播放时英文字幕实时翻译成中文显示" :aria-pressed="translateSettings.Enabled" @click="toggleTranslateSetting(!translateSettings.Enabled)">字幕翻译：{{ translateSettings.Enabled ? '开' : '关' }}</button>
-          <button type="button" class="settings-choice" @click="checkTranslateModel">检测模型</button>
+          <button type="button" class="settings-choice" :class="{ active: translateSettings.Provider === 'free' }" title="用免费接口翻译" :aria-pressed="translateSettings.Provider === 'free'" @click="setTranslateProvider('free')">免费接口</button>
+          <button type="button" class="settings-choice" :class="{ active: translateSettings.Provider === 'off' }" title="不翻译，显示英文原文" :aria-pressed="translateSettings.Provider === 'off'" @click="setTranslateProvider('off')">关闭</button>
+          <button type="button" class="settings-choice" @click="checkTranslateModel">检测接口</button>
         </div>
-        <div v-if="translateSettings.Enabled" class="src-add">
-          <label>模型 <input v-model="translateModel" type="text" placeholder="qwen2.5:3b" /></label>
-          <label>地址 <input v-model="translateEndpoint" type="text" placeholder="http://127.0.0.1:11434" /></label>
+        <div v-if="translateSettings.Provider === 'free'" class="settings-personalize">
+          <button type="button" class="settings-choice" :class="{ active: translateSettings.FreeProvider === 'azure' }" @click="setTranslateFreeProvider('azure')">微软 Azure</button>
+          <button type="button" class="settings-choice" :class="{ active: translateSettings.FreeProvider === 'google' }" @click="setTranslateFreeProvider('google')">谷歌</button>
+          <button type="button" class="settings-choice" :class="{ active: translateSettings.FreeProvider === 'cloudflare' }" @click="setTranslateFreeProvider('cloudflare')">Cloudflare</button>
         </div>
+        <div v-if="translateSettings.Provider === 'free' && translateSettings.FreeProvider === 'azure'" class="src-add">
+          <label>API Key <input v-model="translateFreeAPIKey" type="password" placeholder="Azure Translator 的 Key（F0 免费层）" /></label>
+          <label>区域（可选） <input v-model="translateAzureRegion" type="text" placeholder="如 eastasia，留空也行" /></label>
+        </div>
+        <div v-if="translateSettings.Provider === 'free' && translateSettings.FreeProvider === 'google'" class="src-add">
+          <label>API Key <input v-model="translateFreeAPIKey" type="password" placeholder="Google Cloud 的 API Key（免费层）" /></label>
+        </div>
+        <div v-if="translateSettings.Provider === 'free' && translateSettings.FreeProvider === 'cloudflare'" class="src-add">
+          <label>账号 ID <input v-model="translateCFAccountID" type="text" placeholder="Cloudflare 账号 ID" /></label>
+          <label>API 令牌 <input v-model="translateCFToken" type="password" placeholder="有 Workers AI 权限的 API 令牌" /></label>
+        </div>
+        <p v-if="translateSettings.Provider === 'free' && translateSettings.FreeProvider === 'azure'" class="home-empty">Key 在 Azure 门户免费开 Translator 资源（F0 层，每月 200 万字符免费）获取，只存在本机。</p>
+        <p v-if="translateSettings.Provider === 'free' && translateSettings.FreeProvider === 'google'" class="home-empty">Key 在 Google Cloud 控制台免费开（启用 Cloud Translation API，每月 50 万字符免费）获取，只存在本机。</p>
+        <p v-if="translateSettings.Provider === 'free' && translateSettings.FreeProvider === 'cloudflare'" class="home-empty">令牌在 Cloudflare 控制台 → API 令牌 → 创建令牌（选 Workers AI 模板）获取，只存在本机。免费层每天 10000 neurons，字幕短句够用。</p>
         <p v-if="translateModelMsg" class="home-empty">{{ translateModelMsg }}</p>
       </section>
 
       <section class="src-section">
         <h3>直播实时字幕</h3>
-        <p class="home-empty">看直播时把英文说话实时听写并翻成中文显示（Whisper 听写 + 同一个 Ollama 模型翻译；首次使用会下载识别程序与模型并缓存，不打进安装包）。</p>
+        <p class="home-empty">看直播时把英文说话实时听写并翻成中文显示（Whisper 听写 + 字幕翻译里选的免费接口翻译；首次使用会下载识别程序与模型并缓存，不打进安装包）。</p>
         <div class="settings-personalize">
           <button type="button" class="settings-choice" :class="{ active: liveSubtitleSettings.Enabled }" title="开启后，看英文直播时画面下方实时出中文字幕" :aria-pressed="liveSubtitleSettings.Enabled" @click="toggleLiveSubtitleSetting(!liveSubtitleSettings.Enabled)">直播实时字幕：{{ liveSubtitleSettings.Enabled ? '开' : '关' }}</button>
           <button type="button" class="settings-choice" @click="refreshLiveSubtitleStatus">查看状态</button>
@@ -2579,9 +2384,6 @@ onBeforeUnmount(() => {
           <button @click="checkUpdate">检查更新</button>
           <button @click="openAbout">关于我们</button>
           <button @click="showDisclaimer = true">免责条款</button>
-          <button @click="showOpenSource = true">开源库</button>
-          <button @click="openURL('https://github.com/teaGod-s/UnBox')">源码</button>
-          <button @click="openDonations">捐助榜单</button>
         </div>
         <p v-if="updateMsg" class="home-empty">{{ updateMsg }}</p>
         <div v-if="updateInfo?.HasUpdate && updateInfo.URL" class="src-add">
@@ -2589,12 +2391,6 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section class="src-section">
-        <h3>日志</h3>
-        <div class="src-add">
-          <button @click="openLogs">查看日志</button>
-        </div>
-      </section>
     </section>
     </div>
 
@@ -2691,22 +2487,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="showLogs" class="settings-overlay" @click.self="showLogs = false">
-      <div class="settings-panel">
-        <div class="settings-head">
-          <h2>日志</h2>
-          <button @click="showLogs = false">✕</button>
-        </div>
-        <div class="log-toolbar">
-          <button @click="refreshLogs">刷新</button>
-          <button @click="copyLogs">复制</button>
-          <span v-if="copyMsg" class="ok">{{ copyMsg }}</span>
-        </div>
-        <pre v-if="logs" class="log-view">{{ logs }}</pre>
-        <p v-else class="home-empty">暂无日志</p>
-      </div>
-    </div>
-
     <div v-if="showAbout" class="settings-overlay" @click.self="showAbout = false">
       <div class="settings-panel">
         <div class="settings-head">
@@ -2718,7 +2498,7 @@ onBeforeUnmount(() => {
           <p>UnBox 是一个跨平台（Windows / macOS / Linux）的 TVBox 兼容桌面播放器，支持 IPTV 直播与视频点播，一个安装包装好即用。</p>
           <p class="about-ver">当前版本：{{ currentVersion }}</p>
           <p class="about-ver">内部版本：{{ internalVersion }}</p>
-          <p>技术栈：Go 1.27 + Wails v3 + Vue 3 + TypeScript。完全开源，源码见「源码」按钮。</p>
+          <p>技术栈：Go 1.27 + Wails v3 + Vue 3 + TypeScript。完全开源。</p>
         </div>
       </div>
     </div>
@@ -2733,54 +2513,6 @@ onBeforeUnmount(() => {
           <p>UnBox 是一个开源的「空壳」播放器，本身不提供、不存储、不制作任何影视内容，也不内置任何内容源。</p>
           <p>本软件仅为用户提供技术性的播放能力。用户自行导入的内容源（订阅、M3U、TVBox 源等）及其所指向的资源，均由第三方提供，与本软件无关。</p>
           <p>请遵守当地法律法规，仅将本软件用于访问您拥有合法权利或已获授权的内容。用户因使用本软件而产生的任何法律后果由用户自行承担，本软件及作者不承担任何责任。</p>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="showOpenSource" class="settings-overlay" @click.self="showOpenSource = false">
-      <div class="settings-panel">
-        <div class="settings-head">
-          <h2>开源库</h2>
-          <button @click="showOpenSource = false">✕</button>
-        </div>
-        <ul class="oss-list">
-          <li><a href="https://github.com/wailsapp/wails" target="_blank" rel="noopener">Wails</a><span class="oss-ver">v3.1.0</span><span class="oss-lic">MIT</span> — 桌面应用框架</li>
-          <li><a href="https://gitlab.com/cznic/sqlite" target="_blank" rel="noopener">modernc.org/sqlite</a><span class="oss-ver">v1.62.0</span><span class="oss-lic">BSD-3</span> — 纯 Go SQLite</li>
-          <li><a href="https://github.com/PuerkitoBio/goquery" target="_blank" rel="noopener">goquery</a><span class="oss-ver">v1.13.0</span><span class="oss-lic">BSD-3</span> — HTML 文档解析</li>
-          <li><a href="https://github.com/dop251/goja" target="_blank" rel="noopener">goja</a><span class="oss-ver">2026-11-10</span><span class="oss-lic">MIT</span> — Go JavaScript 引擎</li>
-          <li><a href="https://github.com/vuejs/core" target="_blank" rel="noopener">Vue</a><span class="oss-ver">v3.5.45</span><span class="oss-lic">MIT</span> — 前端框架</li>
-          <li><a href="https://github.com/video-dev/hls.js" target="_blank" rel="noopener">hls.js</a><span class="oss-ver">v1.7.4</span><span class="oss-lic">Apache-2.0</span> — HLS 播放</li>
-          <li><a href="https://github.com/xqq/mpegts.js" target="_blank" rel="noopener">mpegts.js</a><span class="oss-ver">v1.8.2</span><span class="oss-lic">MIT</span> — MPEG-TS / FLV 播放</li>
-          <li><a href="https://github.com/cure53/DOMPurify" target="_blank" rel="noopener">DOMPurify</a><span class="oss-ver">v3.4.17</span><span class="oss-lic">Apache-2.0</span> — HTML 清洗</li>
-        </ul>
-      </div>
-    </div>
-
-    <div v-if="showDonations" class="settings-overlay" @click.self="showDonations = false">
-      <div class="settings-panel donation-leaderboard" role="dialog" aria-modal="true" aria-labelledby="donation-leaderboard-title">
-        <div class="settings-head">
-          <h2 id="donation-leaderboard-title">捐助榜单</h2>
-          <button type="button" aria-label="关闭" @click="showDonations = false">✕</button>
-        </div>
-        <ul v-if="donationViewState === 'list'" class="donation-list">
-          <li v-for="(donor, index) in donationLeaderboard.Donors" :key="donor.ID || 'anonymous-' + index">
-            <img
-              class="donation-avatar"
-              :src="donor.Avatar || DEFAULT_DONOR_AVATAR"
-              :alt="donor.Name + '的头像'"
-              loading="lazy"
-              referrerpolicy="no-referrer"
-              @error="donorAvatarError"
-            />
-            <span class="donation-name">{{ donor.Name }}</span>
-          </li>
-        </ul>
-        <p v-else-if="donationViewState === 'loading'" class="donation-empty">正在加载捐助榜单…</p>
-        <p v-else-if="donationViewState === 'error'" class="donation-empty">加载失败，请稍后重试</p>
-        <p v-else class="donation-empty">还没有捐助记录，感谢每一份支持</p>
-        <div class="donation-footer">
-          <span v-if="donationUpdatedText !== '未知'" class="donation-updated">数据更新于 {{ donationUpdatedText }}</span>
-          <button type="button" class="donation-action" @click="openURL(DONATE_URL)">捐助</button>
         </div>
       </div>
     </div>

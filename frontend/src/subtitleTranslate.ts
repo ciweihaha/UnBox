@@ -1,37 +1,70 @@
-// subtitleTranslate.ts — 本地大模型英译中：播放器字幕的翻译队列/去重/缓存。
+// subtitleTranslate.ts — 免费接口英译中：播放器字幕的翻译队列/去重/缓存。
 //
 // 只做英译中、单条短文本：PlaybackView 在字幕轨 cuechange 时把当前 cue
-// 文本传进来，拿到译文就用覆盖层显示，拿不到（模型没装、服务没起、超时、
-// 返回空）就返回原文，翻译失败永远不挡播放。
+// 文本传进来，拿到译文就用覆盖层显示，拿不到（接口没通、超时、返回空）
+// 就返回原文，翻译失败永远不挡播放。本地大模型已删除
+// （2026-11-19 用户决定：效果不好），翻译只走免费接口。
 
-/** 默认翻译模型：Qwen2.5-3B 指令版，下载约 1.9GB，字幕短句在 GPU 上约 0.5 秒/条。 */
-export const DEFAULT_TRANSLATE_MODEL = 'qwen2.5:3b'
+/** 翻译开关二选一：免费接口 / 关闭。 */
+export type TranslateProvider = 'free' | 'off'
 
-/** 默认本地模型地址：Ollama 默认监听地址。 */
-export const DEFAULT_TRANSLATE_ENDPOINT = 'http://127.0.0.1:11434'
+export const TRANSLATE_PROVIDERS: TranslateProvider[] = ['free', 'off']
+
+/** 免费接口服务商三选一：微软 Azure（默认）/ 谷歌 / Cloudflare。 */
+export type FreeTranslateProvider = 'azure' | 'google' | 'cloudflare'
+
+export const FREE_TRANSLATE_PROVIDERS: FreeTranslateProvider[] = ['azure', 'google', 'cloudflare']
 
 /** 翻译缓存上限：字幕去重后条目有限，超了就清空重记，避免长片看下来无限膨胀。 */
 export const MAX_TRANSLATE_CACHE_ENTRIES = 500
 
 export interface TranslateSettings {
   Enabled: boolean
-  Model: string
-  Endpoint: string
+  Provider: TranslateProvider
+  FreeProvider: FreeTranslateProvider
+  FreeAPIKey: string
+  AzureRegion: string
+  CFAccountID: string
+  CFToken: string
 }
 
-/** normalizeTranslateSettings 把后端/旧版返回的残缺设置归一化；空模型/地址回退默认。 */
+/** normalizeTranslateSettings 把后端/旧版返回的残缺设置归一化。
+ * 旧版只有 Enabled（无 Provider）时按开关迁移：开→免费接口，关→关闭；
+ * 旧版 Provider 是 ollama（本地模型已删）或 cloudflare（现为服务商）
+ * 时迁到免费接口，cloudflare 保留为服务商。 */
 export function normalizeTranslateSettings(
   value: Partial<TranslateSettings> | null | undefined,
 ): TranslateSettings {
-  const model =
-    typeof value?.Model === 'string' && value.Model.trim() !== ''
-      ? value.Model.trim()
-      : DEFAULT_TRANSLATE_MODEL
-  const endpoint =
-    typeof value?.Endpoint === 'string' && value.Endpoint.trim() !== ''
-      ? value.Endpoint.trim()
-      : DEFAULT_TRANSLATE_ENDPOINT
-  return { Enabled: value?.Enabled === true, Model: model, Endpoint: endpoint }
+  // 旧版 Provider 可能是已删除的 'ollama' 或已改为服务商的 'cloudflare'：
+  // 前者迁到免费接口，后者迁到免费接口 + Cloudflare 服务商。
+  const legacyProvider = value?.Provider as string | undefined
+  const provider: TranslateProvider =
+    legacyProvider === 'free' || legacyProvider === 'off'
+      ? legacyProvider
+      : legacyProvider === 'ollama' || legacyProvider === 'cloudflare'
+        ? 'free'
+        : value?.Enabled === true
+          ? 'free'
+          : 'off'
+  let freeProvider: FreeTranslateProvider = 'azure'
+  if (
+    value?.FreeProvider === 'azure' ||
+    value?.FreeProvider === 'google' ||
+    value?.FreeProvider === 'cloudflare'
+  ) {
+    freeProvider = value.FreeProvider
+  } else if (legacyProvider === 'cloudflare') {
+    freeProvider = 'cloudflare'
+  }
+  return {
+    Enabled: provider !== 'off',
+    Provider: provider,
+    FreeProvider: freeProvider,
+    FreeAPIKey: typeof value?.FreeAPIKey === 'string' ? value.FreeAPIKey.trim() : '',
+    AzureRegion: typeof value?.AzureRegion === 'string' ? value.AzureRegion.trim() : '',
+    CFAccountID: typeof value?.CFAccountID === 'string' ? value.CFAccountID.trim() : '',
+    CFToken: typeof value?.CFToken === 'string' ? value.CFToken.trim() : '',
+  }
 }
 
 /** isTranslatableText：英文短句才值得翻译；含中文、空文本、纯标点数字直接跳过。 */
@@ -83,7 +116,7 @@ export function createSubtitleTranslator(api: TranslateSubtitleApi): SubtitleTra
         cache.set(text, result)
         return result
       } catch {
-        // 模型没起、超时、服务报错：回退原文，不缓存失败结果，下次再试。
+        // 接口没通、超时、服务报错：回退原文，不缓存失败结果，下次再试。
         return text
       } finally {
         inflight.delete(text)

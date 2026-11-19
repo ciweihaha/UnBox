@@ -10,11 +10,6 @@ describe('playback scope', () => {
     expect(playbackPlanForMode('live', plans, 'vod')).toBeNull()
   })
 
-  it('allows the library page to reuse the vod playback slot', () => {
-    const plans = { live: 'live-plan', vod: 'library-plan' }
-    expect(playbackPlanForMode('library', plans, 'vod')).toBe('library-plan')
-  })
-
   it('keeps the captured fallback scope when the request resolves after a page switch', async () => {
     let resolve!: (plan: { ID: string }) => void
     const request = new Promise<{ ID: string }>(done => { resolve = done })
@@ -36,7 +31,6 @@ describe('playback scope', () => {
 
   it('rejects late vod progress outside the vod detail page', () => {
     expect(shouldRecordVodProgress('vod', 'detail')).toBe(true)
-    expect(shouldRecordVodProgress('library', 'list')).toBe(true)
     expect(shouldRecordVodProgress('live', 'detail')).toBe(false)
     expect(shouldRecordVodProgress('vod', 'list')).toBe(false)
   })
@@ -51,7 +45,7 @@ describe('playback scope', () => {
 })
 
 describe('mpv 缺失', () => {
-  // 本地媒体库 / HEVC 的 HLS / RTMP 直接路由到 mpv，不经过 Web 降级，
+  // HEVC 的 HLS / RTMP 直接路由到 mpv，不经过 Web 降级，
   // 因此不能只靠 fallback 置位来判断「这次失败是不是缺 mpv」。
   it('识别「缺 mpv」造成的播放失败', () => {
     expect(isMpvUnavailableError('mpv 插件未安装')).toBe(true)

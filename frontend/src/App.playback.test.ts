@@ -278,24 +278,31 @@ describe('App 播放事件接线', () => {
     expect(app).toContain("if (vodPlaybackPlan.value?.Backend !== 'web') vodPlaybackPlan.value = null")
   })
 
-  it('设置页通过捐助榜单弹窗展示，且关于区不再有独立捐助按钮', () => {
-    expect(app).toContain('const showDonations = ref(false)')
-    expect(app).toContain('GetDonationLeaderboard()')
-    expect(app).toContain('openURL(DONATE_URL)')
-    expect(app).toContain('donation-leaderboard')
+  it('关于区只留检查更新、关于我们、免责条款三项', () => {
+    expect(app).not.toContain('GetDonationLeaderboard')
+    expect(app).not.toContain('donation-leaderboard')
+    expect(app).not.toContain('openDonations')
+    expect(app).not.toContain('showOpenSource')
+    expect(app).not.toContain('DONATE_URL')
 
     const aboutStart = app.indexOf('<h3>关于</h3>')
-    const aboutEnd = app.indexOf('<h3>日志</h3>', aboutStart)
+    const aboutEnd = app.indexOf('</section>', aboutStart)
     const aboutSection = app.slice(aboutStart, aboutEnd)
-    expect(aboutSection).toContain('@click="openDonations"')
-    expect(aboutSection).not.toContain('@click="openURL(DONATE_URL)"')
+    for (const label of ['检查更新', '关于我们', '免责条款']) {
+      expect(aboutSection).toContain(label)
+    }
+    for (const gone of ['开源库', '源码', '捐助榜单']) {
+      expect(aboutSection).not.toContain(gone)
+    }
   })
 
-  // 播放失败的原因如果只显示在界面上，用户没法把「查看日志」发给我们，只能截图。
-  it('播放失败原因同时写入后端日志', () => {
+  // 日志模块已删除（v0.9.14）：播放失败只在界面回显，不再写后端日志。
+  it('播放失败原因经 setVodPlaybackError 统一处理（不再写后端日志）', () => {
     expect(app).toContain('setVodPlaybackError')
     expect(app).toContain("if (state === 'error' && message) setVodPlaybackError(message)")
     expect(app).toContain("setVodPlaybackError('所有线路均无法播放当前剧集')")
+    expect(app).not.toContain('ShellService.LogError')
+    expect(app).not.toContain('查看日志')
   })
 
   // 跨语言配对：前端靠文案匹配后端的哨兵错误，任一边改了文案都必须在这里暴露，
@@ -307,15 +314,5 @@ describe('App 播放事件接线', () => {
     // 播放失败统一收敛到 setVodPlaybackError / setLivePlaybackError，其内部调用
     // notePlaybackFailure(message) 做 mpv 缺失检测。
     expect(app).toContain('notePlaybackFailure(message)')
-  })
-
-  // 弹窗一打开 Donors 还是空数组，直接按长度判断会把「加载中」显示成「还没人捐助」。
-  it('捐助弹窗按拉取状态区分加载中、失败与空态', () => {
-    expect(app).toContain("donationViewState === 'loading'")
-    expect(app).toContain("donationViewState === 'error'")
-    expect(app).toContain('正在加载捐助榜单…')
-    expect(app).toContain('加载失败，请稍后重试')
-    // 空态文案不能再由 Donors.length 直接决定，否则拉取期间会误报「没人捐助」。
-    expect(app).not.toContain('v-if="donationLeaderboard.Donors.length"')
   })
 })

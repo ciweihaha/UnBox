@@ -77,8 +77,6 @@ mise run scan          # go run ./cmd/unbox-scan
   `matrix()` 变换贴到顶面菱形，勿手改坐标。
 - 打包元数据：产品名用 `UnBox`，公司名 / 厂商统一用 `RejectCode`（nfpm `vendor`、
   NSIS `INFO_COMPANYNAME`、`info.json` 的 `CompanyName`/`LegalCopyright`）。
-- 捐助入口：前端 `App.vue` 顶部 `DONATE_URL` 是爱发电链接（`afdian.com/a/teaGod`），
-  README 捐助栏目里也有一处，保持一致。
 
 ## 架构（internal/ 包）
 
@@ -90,11 +88,10 @@ mise run scan          # go run ./cmd/unbox-scan
   - `mpvplugin` — 外部 mpv 探测 + 安装兜底（Windows NSIS 安装包优先使用应用目录内嵌 mpv，随后检查用户插件目录和系统 PATH；Linux/macOS 仍弹安装命令）；
   - `failover` — 故障切换包装。
 - `internal/playback` — 播放编排：Resolver（share 页解析）→ Controller（Web/mpv 路由）
-  → Proxy（本地代理 + HLS 分片重写）。走 mpv 的只有四种情况（`needsMPV`）：**本地媒体库
-  文件**、RTMP、HEVC 的 HLS、以及 Web 播放失败后的 `Fallback`。Windows/macOS 其余一律走
-  Web，所以「Windows 上总碰到 mpv」通常意味着用户在媒体库看片、或在看 H.265 源。
-- `internal/library` — 本地媒体库：递归扫描识别视频 + 片名/海报匹配，带 token 鉴权与防
-  目录穿越的本地文件 HTTP 服务 + 进度门面（M3）。
+  → Proxy（本地代理 + HLS 分片重写）。走 mpv 的只有三种情况（`needsMPV`）：RTMP、
+  HEVC 的 HLS、以及 Web 播放失败后的 `Fallback`。Windows/macOS 其余一律走
+  Web，所以「Windows 上总碰到 mpv」通常意味着在看 H.265 源。
+  （本地媒体库已于 v0.9.14 删除，不再有本地文件走 mpv 的情况。）
 - `internal/shell` — 全部 Wails glue（app / 窗口 / 服务）。全站搜索在
   `service.go` 的 `vodSearchAll`：站点级 `siteSearchTimeout`(12s)、并发度走
   `SearchThreads`（1/4/8/16，**内存权威值**，别改回每次读库）、吃满超时的站点进

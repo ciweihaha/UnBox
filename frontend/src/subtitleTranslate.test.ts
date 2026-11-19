@@ -35,23 +35,79 @@ describe('isTranslatableText', () => {
 })
 
 describe('normalizeTranslateSettings', () => {
-  it('缺失值回退默认：开关关、Qwen2.5-3B、本地 Ollama 地址', () => {
+  it('缺失值回退默认：开关关、免费接口、Azure 服务商', () => {
     expect(normalizeTranslateSettings(null)).toEqual({
       Enabled: false,
-      Model: 'qwen2.5:3b',
-      Endpoint: 'http://127.0.0.1:11434',
+      Provider: 'off',
+      FreeProvider: 'azure',
+      FreeAPIKey: '',
+      AzureRegion: '',
+      CFAccountID: '',
+      CFToken: '',
     })
     expect(normalizeTranslateSettings({})).toEqual({
       Enabled: false,
-      Model: 'qwen2.5:3b',
-      Endpoint: 'http://127.0.0.1:11434',
+      Provider: 'off',
+      FreeProvider: 'azure',
+      FreeAPIKey: '',
+      AzureRegion: '',
+      CFAccountID: '',
+      CFToken: '',
     })
   })
 
-  it('只有 Enabled 严格等于 true 才算开；模型/地址去空白，空值回退默认', () => {
+  it('只有 Enabled 严格等于 true 才算开；Key 去空白', () => {
     expect(
-      normalizeTranslateSettings({ Enabled: 'yes', Model: '  qwen2.5:7b  ', Endpoint: ' ' } as never),
-    ).toEqual({ Enabled: false, Model: 'qwen2.5:7b', Endpoint: 'http://127.0.0.1:11434' })
+      normalizeTranslateSettings({ Enabled: 'yes', FreeAPIKey: '  key-1  ' } as never),
+    ).toEqual({
+      Enabled: false,
+      Provider: 'off',
+      FreeProvider: 'azure',
+      FreeAPIKey: 'key-1',
+      AzureRegion: '',
+      CFAccountID: '',
+      CFToken: '',
+    })
+  })
+
+  it('旧版 Provider 迁移：ollama 迁到免费接口，cloudflare 迁到免费接口 + Cloudflare 服务商', () => {
+    expect(normalizeTranslateSettings({ Enabled: true, Provider: 'ollama' } as never)).toEqual({
+      Enabled: true,
+      Provider: 'free',
+      FreeProvider: 'azure',
+      FreeAPIKey: '',
+      AzureRegion: '',
+      CFAccountID: '',
+      CFToken: '',
+    })
+    expect(normalizeTranslateSettings({ Enabled: true, Provider: 'cloudflare' } as never)).toEqual({
+      Enabled: true,
+      Provider: 'free',
+      FreeProvider: 'cloudflare',
+      FreeAPIKey: '',
+      AzureRegion: '',
+      CFAccountID: '',
+      CFToken: '',
+    })
+  })
+
+  it('免费接口 + 服务商 + Key 原样保留', () => {
+    expect(
+      normalizeTranslateSettings({
+        Enabled: true,
+        Provider: 'free',
+        FreeProvider: 'google',
+        FreeAPIKey: 'google-key-1',
+      }),
+    ).toEqual({
+      Enabled: true,
+      Provider: 'free',
+      FreeProvider: 'google',
+      FreeAPIKey: 'google-key-1',
+      AzureRegion: '',
+      CFAccountID: '',
+      CFToken: '',
+    })
   })
 })
 
@@ -101,7 +157,7 @@ describe('createSubtitleTranslator', () => {
 
   it('后端失败返回原文、不抛错（翻译失败绝不挡播放）', async () => {
     const translator = createSubtitleTranslator(api(async () => {
-      throw new Error('模型没起')
+      throw new Error('接口超时')
     }))
     await expect(translator.translate('Hello')).resolves.toBe('Hello')
   })

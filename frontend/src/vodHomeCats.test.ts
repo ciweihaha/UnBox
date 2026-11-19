@@ -8,15 +8,11 @@ const app = readFileSync('src/App.vue', 'utf8')
 const homeCatsDiv = app.indexOf('class="home-cats"')
 const homeCatsSection = app.slice(app.lastIndexOf('<div', homeCatsDiv), app.indexOf('class="home-rows"', homeCatsDiv))
 
-// 点播页自己的类目栏（<div class="cats-list"> 到 </aside> 之间）。
-const vodCatsStart = app.indexOf('class="cats-list"')
-const vodCatsSection = app.slice(vodCatsStart, app.indexOf('</aside>', vodCatsStart))
-
 // 首页分类栏只留电影 / 电视剧 / 动漫 / 综艺四项（第 6 项）：
 // 分类是源站下发的（vodCategories），各源命名不一（电影片、连续剧、剧集、
 // 动画……），所以不能按相等过滤，要按名包含匹配；每类只取第一个命中的，
 // 同一类出两个芯片（如电视剧 + 连续剧）就又不止四项了。
-// 点播页自己的类目栏保持全量，不动。
+// 点播页的类目栏已删除（v0.9.14），分类只在顶部导航（电影/电视/综艺/儿童）。
 describe('vod home category bar', () => {
   it('renders the home bar from the four main categories, not the raw source list', () => {
     expect(homeCatsSection).toContain('v-if="homeMainCats.length"')
@@ -43,7 +39,10 @@ describe('vod home category bar', () => {
     expect(app).toMatch(/homeMainCats[\s\S]{0,600}\.find\(/)
   })
 
-  it('keeps the vod page category rail unfiltered', () => {
-    expect(vodCatsSection).toContain('v-for="c in vodCategories"')
+  it('点播页不再有类目栏：分类只在顶部导航（电影/电视/综艺/儿童）', () => {
+    expect(app).not.toContain('class="vod-cats"')
+    expect(app).not.toContain('class="cats-list"')
+    expect(app).toContain('TOP_NAV_CATEGORIES')
+    expect(app).toContain('goTopNavCategory')
   })
 })

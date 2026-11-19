@@ -17,10 +17,9 @@ describe('live layout contract', () => {
 })
 
 describe('vod layout contract', () => {
-  it('shares one rhythm between the card grid and the category rail', () => {
+  it('shares one rhythm between the card grid and the vod panel', () => {
     expect(stylesheet).toMatch(/--content-col:\s*148px;/)
     expect(stylesheet).toMatch(/--content-gap:\s*0\.75rem;/)
-    expect(stylesheet).toMatch(/--vod-rail:\s*128px;/)
 
     // 卡片列宽、卡片间距、卡片内边距统一走 token，不再散落字面量。
     expect(stylesheet).toMatch(/\.content-card-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(min\(100%, var\(--content-col\)\), 1fr\)\);/s)
@@ -28,17 +27,14 @@ describe('vod layout contract', () => {
     expect(stylesheet).toMatch(/\.content-card-grid\s*\{[^}]*padding:\s*var\(--content-gap\);/s)
 
     // 点播页必须重新声明 padding：.vod-main ul { padding: 0 } 的特异性更高，
-    // 不重新声明会让卡片贴着面板边框，和侧栏的留白对不上。
+    // 不重新声明会让卡片贴着面板边框。
     expect(stylesheet).toMatch(/\.vod-main ul\.content-card-grid\s*\{[^}]*padding:\s*var\(--content-gap\);/s)
 
-    // 侧栏宽度与内边距同样走 token，两个面板的留白节奏一致。
-    expect(stylesheet).toMatch(/\.vod-layout\s*\{[^}]*grid-template-columns:\s*var\(--vod-rail\) minmax\(0, 1fr\);[^}]*gap:\s*var\(--content-gap\);/s)
-    expect(stylesheet).toMatch(/\.vod-cats\s*\{[^}]*padding:\s*var\(--content-gap\);/s)
-  })
-
-  it('keeps the category rail narrower than a single card column', () => {
-    const px = (re: RegExp) => Number(stylesheet.match(re)![1])
-    expect(px(/--vod-rail:\s*(\d+)px/)).toBeLessThan(px(/--content-col:\s*(\d+)px/))
+    // 点播页不再有侧边类目栏：.vod-layout 只是普通块，不再分栏。
+    expect(stylesheet).not.toContain('.vod-cats')
+    expect(stylesheet).not.toContain('--vod-rail')
+    expect(stylesheet).toMatch(/\.vod-layout\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;/s)
+    expect(stylesheet).not.toMatch(/\.vod-layout\s*\{[^}]*grid-template-columns:/s)
   })
 
   it('keeps a single vod item at the configured card width', () => {
@@ -63,15 +59,6 @@ describe('vod layout contract', () => {
     expect(stylesheet).not.toMatch(/\.content-card-title\s*\{[^}]*position:\s*absolute;/s)
     expect(stylesheet).toMatch(/\.content-card-title\s*\{[^}]*margin-top:\s*0\.45rem;/s)
     expect(stylesheet).toMatch(/\.content-card-progress\s*\{[^}]*bottom:\s*0\.35rem;/s)
-  })
-})
-
-describe('library playlist layout contract', () => {
-  it('keeps symmetric card padding and a narrow vertical scrollbar', () => {
-    expect(stylesheet).toMatch(/\.library-body\s*\{[^}]*gap:\s*6px;/s)
-    expect(stylesheet).toMatch(/\.library-side\s*\{[^}]*padding-left:\s*0;[^}]*padding-right:\s*12px;/s)
-    // 细滚动条已统一为全局规则（直播页风格），不再按面板逐一声明
-    expect(stylesheet).toMatch(/\*::-webkit-scrollbar\s*\{[^}]*width:\s*6px;[^}]*height:\s*6px;/s)
   })
 })
 

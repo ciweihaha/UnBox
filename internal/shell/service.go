@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,8 +17,6 @@ import (
 	"time"
 
 	"github.com/unbox/unbox/internal/config"
-	"github.com/unbox/unbox/internal/library"
-	"github.com/unbox/unbox/internal/library/thumb"
 	"github.com/unbox/unbox/internal/playback"
 	"github.com/unbox/unbox/internal/player"
 	"github.com/unbox/unbox/internal/player/failover"
@@ -32,6 +29,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"os"
 	"runtime"
+	"runtime/debug"
 )
 
 // ImportResult 是导入订阅的摘要。
@@ -262,7 +260,6 @@ func newShellService(pv provider.Provider, p player.Player, st *store.Store) *Sh
 		live:             pv,
 		player:           p,
 		store:            st,
-		library:          library.New(st, filepath.Join(root, "unbox", "posters"), nil),
 		vods:             map[string]provider.Provider{},
 		vodNames:         map[string]string{},
 		playback:         controller,
@@ -287,91 +284,16 @@ func NewShellService(pv provider.Provider, p player.Player, st *store.Store) *Sh
 	return svc
 }
 
-// ServiceShutdown 在 Wails 退出服务阶段释放媒体库 HTTP 服务和播放资源。
+// ServiceShutdown 在 Wails 退出服务阶段释放播放资源。
 func (s *ShellService) ServiceShutdown() error {
 	s.stopPlaybackBridge()
 	var firstErr error
-	if s.library != nil {
-		firstErr = s.library.Close()
-	}
 	if s.playback != nil {
 		if err := s.playback.Close(); firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
-}
-
-// AddLibraryDir 注册一个本地媒体库目录。
-func (s *ShellService) AddLibraryDir(path string) error {
-	return s.library.AddDir(path)
-}
-
-// RemoveLibraryDir 移除一个本地媒体库目录及其扫描条目。
-func (s *ShellService) RemoveLibraryDir(path string) error {
-	return s.library.RemoveDir(path)
-}
-
-// ListLibraryDirs 返回已注册的本地媒体库目录。
-func (s *ShellService) ListLibraryDirs() ([]library.LibraryDir, error) {
-	return s.library.ListDirs()
-}
-
-// ScanLibrary 扫描所有已注册的本地媒体库目录。
-func (s *ShellService) ScanLibrary() (library.ScanResult, error) {
-	return s.library.Scan()
-}
-
-// RescanLibrary 是 ScanLibrary 的前端友好别名。
-func (s *ShellService) RescanLibrary() (library.ScanResult, error) {
-	return s.ScanLibrary()
-}
-
-// ListLibrary 返回本地媒体库扫描出的条目。
-func (s *ShellService) ListLibrary() ([]library.LibraryItem, error) {
-	return s.library.List()
-}
-
-// EnsureThumb 注册文件 URL 与缓存 URL，返回是否已缓存。
-func (s *ShellService) EnsureThumb(path string, mtime int64) (videoURL, posterURL string, cached bool, err error) {
-	if s.library == nil {
-		return "", "", false, errors.New("媒体库未就绪")
-	}
-	return s.library.EnsureThumb(path, mtime)
-}
-
-// SaveThumb 写入前端 web-canvas 抓到的 JPEG 字节到缓存。
-func (s *ShellService) SaveThumb(path string, mtime int64, jpeg []byte) (posterURL string, err error) {
-	if s.library == nil {
-		return "", errors.New("媒体库未就绪")
-	}
-	return s.library.SaveThumb(path, mtime, jpeg)
-}
-
-// GenerateThumbMpv 使用当前可用的 mpv 抓取本地视频首帧。
-func (s *ShellService) GenerateThumbMpv(path string, mtime int64) (posterURL string, err error) {
-	if s.library == nil {
-		return "", errors.New("媒体库未就绪")
-	}
-	mpvPath := ""
-	if s.mpvPlugin != nil {
-		mpvPath = s.mpvPlugin.Status().Path
-	}
-	return s.library.GenerateThumbMpv(path, mtime, thumb.NewMpvGenerator(mpvPath, 15*time.Second))
-}
-
-// PrepareLibrary 按本地媒体扩展名选择 Web 或 mpv 播放路由。
-func (s *ShellService) PrepareLibrary(path string) (playback.Plan, error) {
-	stream, err := s.library.StreamFor(path)
-	if err != nil {
-		return playback.Plan{}, err
-	}
-	return s.playback.Prepare(context.Background(), stream)
-}
-
-// RecordLibraryProgress 记录本地媒体的观看进度，供首页继续观看使用。
-func (s *ShellService) RecordLibraryProgress(path string, progress, duration float64) error {
-	return s.library.RecordProgress(path, int(progress), int(duration))
 }
 
 // progressMu 串行化进度事件的上报（collectChannels 的并发回调会并发触发 emit）。
@@ -477,6 +399,7 @@ func (s *ShellService) ImportVodSource(ref string) (ImportResult, error) {
 	s.vodCategoryCache = make(map[string]vodCategoryCacheEntry)
 	s.mu.Unlock()
 	s.addSource("vod", ref)
+	s.recordVodSourceRef(ref)
 	s.saveSubscription()
 	s.emitProgress(Progress{Stage: "done", Message: "点播源导入完成", Done: -1, Total: -1})
 	return ImportResult{Sites: len(vods)}, nil
@@ -572,6 +495,14 @@ func (s *ShellService) DeleteSource(kind, ref string) error {
 		}
 	}
 	s.mu.Unlock()
+	// 删掉的正是已填的 Cloudflare 地址时，把 CF 入口一并清空，来源回到本地。
+	if kind == "vod" {
+		if cfURL, ok, err := s.store.GetKV(vodCFURLKey); err == nil && ok && cfURL != "" && cfURL == ref {
+			_ = s.store.SetKV(vodCFURLKey, "")
+			_ = s.store.SetKV(vodCFUpdatedAtKey, "")
+			s.setVodSourceKind(VodSourceLocal)
+		}
+	}
 	s.clearVodCategoryCache()
 	s.saveSubscription()
 	return nil
@@ -1836,14 +1767,23 @@ func (s *ShellService) CurrentVersion() string {
 	return appVersion
 }
 
+// internalVersion 返回内部构建版本（debug.ReadBuildInfo 的 Main.Version）。
+// 构建时开启 -buildvcs（默认 auto）且处于 git 仓库内，会原生产出伪版本：
+//
+//	无 tag → v0.0.0-<时间>-<commit>
+//	有 tag → vX.Y.(Z+1)-0.<时间>-<commit>
+//
+// 未开 -buildvcs 或不在 git 仓库内构建时为 "(devel)"。
+func internalVersion() string {
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" {
+		return bi.Main.Version
+	}
+	return "(devel)"
+}
+
 // InternalVersion 返回内部构建版本（debug.ReadBuildInfo 的 Main.Version）。
 func (s *ShellService) InternalVersion() string {
 	return internalVersion()
-}
-
-// LogError 把前端传来的错误信息写入日志缓冲，使 RuntimeError 也能在「查看日志」里看到。
-func (s *ShellService) LogError(msg string) {
-	log.Printf("%s", msg)
 }
 
 // CheckUpdate 查询 GitHub 最新 release，返回是否有新版本。

@@ -2,14 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { initializeHomeState } from './startup'
 
 describe('startup initialization', () => {
-  it('loads local library items before refreshing home history', async () => {
+  it('启动时刷新首页观看记录与收藏', async () => {
     const events: string[] = []
 
-    await initializeHomeState(
-      async () => { events.push('library') },
-      async () => { events.push('home') },
-    )
+    await initializeHomeState(async () => { events.push('home') })
 
-    expect(events).toEqual(['library', 'home'])
+    expect(events).toEqual(['home'])
   })
 })
