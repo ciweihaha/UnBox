@@ -114,7 +114,26 @@ function Search-Vod {
       }
     }
     if ($card) {
-      Invoke-ElementOrAncestor $card | Out-Null
+      # 结果数还在变时先别点：聚合搜索流式回填，点到正被重渲染替换的卡片
+      # 会点空（round 9：同一次搜索 22 条 vs 46 条，点后详情没开）。
+      # 等匹配元素数两次采样一致（间隔 2 秒）再点，最多等 10 秒。
+      $prevN = -1
+      for ($s = 0; $s -lt 5; $s++) {
+        $n = (Find-Elements -Root $script:Win -NameLike "*$Query*").Count
+        if ($n -gt 0 -and $n -eq $prevN) { break }
+        $prevN = $n
+        Start-Sleep -Seconds 2
+      }
+      # 稳定后卡片可能已被重渲染，重新取一张再点（旧元素句柄可能失效）。
+      $card = $null
+      foreach ($c in (Find-Elements -Root $script:Win -NameLike "*$Query*")) {
+        try {
+          $r = $c.Current.BoundingRectangle
+          if ($c.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $r.Height -lt 40) { continue }
+          $card = $c; break
+        } catch { continue }
+      }
+      if ($card) { Invoke-ElementOrAncestor $card | Out-Null }
       # 等详情打开：详情要调聚合接口，冷启动几秒才出来，别只睡 4 秒就判。
       $opened = Wait-For {
         ($null -ne (Find-Element -Root $script:Win -Name '更多类似内容')) -or
@@ -122,6 +141,24 @@ function Search-Vod {
         ((Find-Elements -Root $script:Win -NameLike '线路*').Count -ge 1)
       } -Seconds 30
       if ($opened) { $script:SearchDiag = ''; return $true }
+      # 没开：再点一次（第一次点的卡片可能在点击后被重渲染替换）。
+      $card2 = $null
+      foreach ($c in (Find-Elements -Root $script:Win -NameLike "*$Query*")) {
+        try {
+          $r = $c.Current.BoundingRectangle
+          if ($c.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and $r.Height -lt 40) { continue }
+          $card2 = $c; break
+        } catch { continue }
+      }
+      if ($card2) {
+        Invoke-ElementOrAncestor $card2 | Out-Null
+        $opened = Wait-For {
+          ($null -ne (Find-Element -Root $script:Win -Name '更多类似内容')) -or
+          ((Find-Elements -Root $script:Win -NameLike '第*集*').Count -ge 1) -or
+          ((Find-Elements -Root $script:Win -NameLike '线路*').Count -ge 1)
+        } -Seconds 15
+        if ($opened) { $script:SearchDiag = ''; return $true }
+      }
     }
     # 诊断：这次到底看到了什么候选（名/类型/矩形），下次 0 卡片时直接看。
     $diag = @()
@@ -145,6 +182,33 @@ function Get-StatusNames {
     if ($el) { try { $out += $el.Current.Name } catch { $out += $pat } }
   }
   return ($out -join ' | ')
+}
+
+function Get-DirectLiveProbe {
+  # 直播在 app 里播失败时，用本机 curl 直探该台在 live.m3u 里的地址，
+  # 分清是源站/网络问题还是 app 自身探测问题（round 9：CCTV财经在 app
+  # 里报 HTTP 41x，沙箱直探同一地址却是 200——须在出事的机器上当场验）。
+  param([string]$ChannelName)
+  try {
+    $m3u = (Invoke-WebRequest -Uri 'https://live.ciweihaha.win/live.m3u' -UseBasicParsing -TimeoutSec 15).Content
+    $lines = $m3u -split "`n"
+    $url = ''
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+      if ($lines[$i] -match [regex]::Escape($ChannelName)) {
+        for ($j = $i + 1; $j -lt $lines.Count -and $j -lt ($i + 3); $j++) {
+          $t = $lines[$j].Trim()
+          if ($t -match '^https?://') { $url = $t; break }
+        }
+        break
+      }
+    }
+    if ($url -eq '') { return "channel=$ChannelName direct=NOURI" }
+    $code = ''
+    try { $code = (curl.exe -s -o NUL -w '%{http_code}' --max-time 10 $url) } catch { $code = 'curlFail' }
+    return "channel=$ChannelName direct=http=$code url=$url"
+  } catch {
+    return "channel=$ChannelName direct=ERR $($_.Exception.Message)"
+  }
 }
 
 function Get-PlayerProgress {
@@ -580,7 +644,14 @@ if (-not $pass16) {
   $p2 = Get-PlayerProgress
   $pass16 = ($null -ne $p1 -and $null -ne $p2 -and $p2 -gt $p1)
 }
-Add-Result -Id 'T16' -Name '直播点播后进度前进' -Pass $pass16 -Evidence "channel=$liveChannelUsed p1=$p1 p2=$p2 status='$liveStatusAtStart'"
+# 仍不前进：当场用本机 curl 直探该台地址，定性是源/网络还是 app 探测问题。
+$directEv = ''
+if (-not $pass16) {
+  $probeTarget = $liveChannelUsed
+  if ($probeTarget -eq '' -and $script:LastLiveDead.Count -gt 0) { $probeTarget = $script:LastLiveDead[0] }
+  if ($probeTarget -ne '') { $directEv = ' ' + (Get-DirectLiveProbe -ChannelName $probeTarget) }
+}
+Add-Result -Id 'T16' -Name '直播点播后进度前进' -Pass $pass16 -Evidence "channel=$liveChannelUsed p1=$p1 p2=$p2 status='$liveStatusAtStart'$directEv"
 # 空格暂停/继续。
 Send-Key ' '
 Start-Sleep -Seconds 3
