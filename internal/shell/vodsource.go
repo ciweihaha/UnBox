@@ -12,6 +12,7 @@
 package shell
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,7 +21,10 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/unbox/unbox/internal/config"
 )
 
 // 点播源两种来源。
@@ -44,9 +48,13 @@ const (
 )
 
 // CfVodDirectorySource 是点播源目录里的一项：名字 + 地址。
+// Sites 是该源能提供的支持格式点播站点数（拉取目录时顺手验证）：
+// >=0 表示已验证；-1 表示没验证出来（拉不到/解析失败），未知、保留不隐藏；
+// 0 表示已证实没有可用站点，不进下拉框。
 type CfVodDirectorySource struct {
-	Name string `json:"name"`
-	URL  string `json:"url"`
+	Name  string `json:"name"`
+	URL   string `json:"url"`
+	Sites int    `json:"sites"`
 }
 
 // VodSourceStatus 是点播源当前状态（供设置页回显）。
@@ -108,8 +116,15 @@ func (s *ShellService) SetCfVodDirectoryURL(rawURL string) error {
 	return nil
 }
 
+// cfVodDirectoryValidateTimeout 是目录里单条源的验证超时：
+// 只拉一份小配置、数支持格式的站点数，5 秒够了；超时按未知处理（保留）。
+const cfVodDirectoryValidateTimeout = 5 * time.Second
+
 // FetchCfVodDirectory 从目录地址拉取点播源清单：接受 {"sources": [...]}
 // 或裸数组；只要带名字和 http(s) 地址的项，去重（按地址），其余丢弃。
+// 每条源顺手验证一次（并行）：能拉到、解析出 0 个支持格式站点的源
+// （如地址指向的不是 TVBox 配置、而是列表接口）不进下拉框；
+// 拉不到 / 解析失败的按未知保留（不断网时不让下拉框变空）。
 // 目录拉不到（404 / 没网 / 格式不对）时返回错误，前端用内置默认源顶着。
 func (s *ShellService) FetchCfVodDirectory() ([]CfVodDirectorySource, error) {
 	dirURL := s.GetCfVodDirectoryURL()
@@ -129,7 +144,42 @@ func (s *ShellService) FetchCfVodDirectory() ([]CfVodDirectorySource, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parseCfVodDirectory(body)
+	list, err := parseCfVodDirectory(body)
+	if err != nil {
+		return nil, err
+	}
+	// 并行验证每条源的支持站点数，0 站点的剔掉。
+	var wg sync.WaitGroup
+	for i := range list {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			list[i].Sites = s.validateCfVodDirectorySource(context.Background(), list[i].URL)
+		}(i)
+	}
+	wg.Wait()
+	out := make([]CfVodDirectorySource, 0, len(list))
+	for _, src := range list {
+		if src.Sites == 0 {
+			continue
+		}
+		out = append(out, src)
+	}
+	return out, nil
+}
+
+// validateCfVodDirectorySource 拉取并解析一条目录源，返回它能提供的
+// 支持格式点播站点数；拉不到 / 解析失败返回 -1（未知，保留不隐藏）。
+func (s *ShellService) validateCfVodDirectorySource(ctx context.Context, rawURL string) int {
+	raw, err := config.NewFetcherWithTimeout(cfVodDirectoryValidateTimeout).Fetch(ctx, rawURL)
+	if err != nil {
+		return -1
+	}
+	cfgs, err := resolveConfigs(ctx, rawURL, raw)
+	if err != nil {
+		return 0
+	}
+	return config.CountSupportedSites(cfgs)
 }
 
 // parseCfVodDirectory 解析目录 JSON（纯函数，方便单测）。

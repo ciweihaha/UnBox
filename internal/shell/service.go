@@ -390,6 +390,11 @@ func (s *ShellService) ImportVodSource(ref string) (ImportResult, error) {
 		return ImportResult{}, err
 	}
 	vods, vodNames, siteLines := collectVodSites(cfgs)
+	// 0 站点不是成功：配置里一个支持格式的站点都没有（比如地址指向的
+	// 是列表接口而非 TVBox 配置），直接报错、不要把正在用的好源清空。
+	if len(vods) == 0 {
+		return ImportResult{}, errors.New("该源没有可用的点播站点")
+	}
 	s.mu.Lock()
 	s.vods = vods
 	s.vodNames = vodNames

@@ -1050,6 +1050,9 @@ async function saveCfVodUrl() {
     await refreshVod()
   } catch (e) {
     handleError(e)
+    // 导入失败不改动原来源：把下拉框拨回真实在用的源，别让它停在
+    // 那个没拉成的地址上（否则列表是空的、切回来还得再找一遍）。
+    await loadVodSourceStatus()
   }
   finally { importingKind.value = ''; importProgress.value = null }
 }
@@ -1067,6 +1070,7 @@ async function refreshCfVodSource() {
     await refreshVod()
   } catch (e) {
     handleError(e)
+    await loadVodSourceStatus()
   }
   finally { importingKind.value = ''; importProgress.value = null }
 }

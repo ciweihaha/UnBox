@@ -89,4 +89,43 @@ describe('点播源目录解析', () => {
       'https://ysp.ciweihaha.win/oktv-asia.json',
     ])
   })
+
+  it('已证实 0 站点的源不显示；没验证出来的保留', () => {
+    const dir = [
+      { name: '好源', url: 'https://a.example/vod.json', sites: 1 },
+      { name: '空源', url: 'https://b.example/agg', sites: 0 },
+      { name: '未知源', url: 'https://c.example/vod.json', sites: -1 },
+      { name: '没验证', url: 'https://d.example/vod.json' },
+    ]
+    expect(resolveCfVodSources(dir, '')).toEqual([
+      { name: '好源', url: 'https://a.example/vod.json', sites: 1 },
+      { name: '未知源', url: 'https://c.example/vod.json', sites: -1 },
+      { name: '没验证', url: 'https://d.example/vod.json' },
+    ])
+  })
+
+  it('当前正在用的地址哪怕在目录里被滤掉，也以“正在用的源”出现', () => {
+    const dir = [{ name: '空源', url: 'https://b.example/agg', sites: 0 }]
+    expect(resolveCfVodSources(dir, 'https://b.example/agg')).toEqual([
+      { name: '正在用的源', url: 'https://b.example/agg' },
+    ])
+  })
+
+  it('parseCfVodDirectory 透传后端验证出的 sites', () => {
+    expect(
+      parseCfVodDirectory({
+        sources: [
+          { name: '好源', url: 'https://a.example/vod.json', sites: 1 },
+          { name: '空源', url: 'https://b.example/agg', sites: 0 },
+          { name: '未知源', url: 'https://c.example/vod.json', sites: -1 },
+          { name: '没验证', url: 'https://d.example/vod.json' },
+        ],
+      }),
+    ).toEqual([
+      { name: '好源', url: 'https://a.example/vod.json', sites: 1 },
+      { name: '空源', url: 'https://b.example/agg', sites: 0 },
+      { name: '未知源', url: 'https://c.example/vod.json', sites: -1 },
+      { name: '没验证', url: 'https://d.example/vod.json' },
+    ])
+  })
 })

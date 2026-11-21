@@ -29,6 +29,46 @@ func newVodBodyServer(t *testing.T, body string) *httptest.Server {
 	}))
 }
 
+// testVodListResponseJSON 是 agg 风格的列表响应（不是 TVBox 配置）：
+// 有 class/list 但没有 sites，Parse 出 0 站点。
+const testVodListResponseJSON = `{"code":1,"msg":"ok","class":[{"type_id":1,"type_name":"电影"}],"list":[{"vod_id":1,"vod_name":"寻梦环游记"}]}`
+
+func TestImportVodSourceRejectsZeroSites(t *testing.T) {
+	good := newVodConfigServer(t)
+	t.Cleanup(good.Close)
+	svc := newTestService(t)
+	if _, err := svc.SetCloudflareVodURL(good.URL + "/vod.json"); err != nil {
+		t.Fatalf("先导入好源: %v", err)
+	}
+	bad := newVodBodyServer(t, testVodListResponseJSON)
+	t.Cleanup(bad.Close)
+	if _, err := svc.ImportVodSource(bad.URL + "/agg"); err == nil {
+		t.Fatal("0 站点源导入成功，想要错误（不能把好源清空成 0 站）")
+	}
+	st := svc.GetVodSourceStatus()
+	if st.Sites != 1 || st.CloudflareURL != good.URL+"/vod.json" {
+		t.Fatalf("0 站点导入后状态 = %+v，想要仍是好源/1 站", st)
+	}
+}
+
+func TestSetCloudflareVodURLRejectsZeroSites(t *testing.T) {
+	good := newVodConfigServer(t)
+	t.Cleanup(good.Close)
+	svc := newTestService(t)
+	if _, err := svc.SetCloudflareVodURL(good.URL + "/vod.json"); err != nil {
+		t.Fatalf("先导入好源: %v", err)
+	}
+	bad := newVodBodyServer(t, testVodListResponseJSON)
+	t.Cleanup(bad.Close)
+	if _, err := svc.SetCloudflareVodURL(bad.URL + "/agg"); err == nil {
+		t.Fatal("0 站点源切入成功，想要错误（当前来源不能被空源顶掉）")
+	}
+	st := svc.GetVodSourceStatus()
+	if st.Kind != VodSourceCloudflare || st.CloudflareURL != good.URL+"/vod.json" || st.Sites != 1 {
+		t.Fatalf("0 站点切入后状态 = %+v，想要仍是好源/1 站", st)
+	}
+}
+
 func TestVodSourceStatusDefaults(t *testing.T) {
 	svc := newTestService(t)
 	st := svc.GetVodSourceStatus()
@@ -172,12 +212,18 @@ func TestSetCfVodDirectoryURLRejectsNonHTTP(t *testing.T) {
 }
 
 func TestFetchCfVodDirectory(t *testing.T) {
+	good := newVodConfigServer(t)
+	t.Cleanup(good.Close)
+	dead := newVodBodyServer(t, testVodConfigJSON)
+	deadURL := dead.URL + "/vod.json"
+	dead.Close() // 拉不到：保留（未知，不隐藏）
 	dir := newVodBodyServer(t, `{"sources":[
-		{"name":"聚合万能源","url":"https://live.ciweihaha.win/vod.json"},
-		{"name":"聚合·37站","url":"https://ysp.ciweihaha.win/agg"},
+		{"name":"好源","url":"`+good.URL+`/vod.json"},
+		{"name":"死源","url":"`+deadURL+`"},
 		{"name":"","url":"https://bad.example/x.json"},
 		{"name":"坏地址","url":"ftp://bad.example/x.json"}
 	]}`)
+	t.Cleanup(dir.Close)
 	svc := newTestService(t)
 	if err := svc.SetCfVodDirectoryURL(dir.URL + "/sources.json"); err != nil {
 		t.Fatalf("SetCfVodDirectoryURL: %v", err)
@@ -186,8 +232,33 @@ func TestFetchCfVodDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchCfVodDirectory: %v", err)
 	}
-	if len(got) != 2 || got[0].Name != "聚合万能源" || got[1].URL != "https://ysp.ciweihaha.win/agg" {
-		t.Fatalf("拉取结果 = %#v, want 前两项有效源", got)
+	if len(got) != 2 || got[0].Name != "好源" || got[0].Sites != 1 || got[1].Name != "死源" || got[1].Sites != -1 {
+		t.Fatalf("拉取结果 = %#v, want 好源(Sites=1)+死源(Sites=-1)", got)
+	}
+}
+
+// TestFetchCfVodDirectoryFiltersUnsupported：目录里 0 站点的源
+// （能拉到、解析出 0 个支持格式站点，如 agg 的列表响应）不进下拉框。
+func TestFetchCfVodDirectoryFiltersUnsupported(t *testing.T) {
+	good := newVodConfigServer(t)
+	t.Cleanup(good.Close)
+	bad := newVodBodyServer(t, testVodListResponseJSON)
+	t.Cleanup(bad.Close)
+	dir := newVodBodyServer(t, `{"sources":[
+		{"name":"好源","url":"`+good.URL+`/vod.json"},
+		{"name":"空源","url":"`+bad.URL+`/agg"}
+	]}`)
+	t.Cleanup(dir.Close)
+	svc := newTestService(t)
+	if err := svc.SetCfVodDirectoryURL(dir.URL + "/sources.json"); err != nil {
+		t.Fatalf("SetCfVodDirectoryURL: %v", err)
+	}
+	got, err := svc.FetchCfVodDirectory()
+	if err != nil {
+		t.Fatalf("FetchCfVodDirectory: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "好源" || got[0].Sites != 1 {
+		t.Fatalf("拉取结果 = %#v, want 只有好源(Sites=1)，0 站点的空源要滤掉", got)
 	}
 }
 

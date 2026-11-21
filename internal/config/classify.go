@@ -67,3 +67,29 @@ func Classify(s Site) (kind string, sup Support) {
 	}
 	return "unknown", SupportNo
 }
+
+// CountSupportedSites 统计多份配置里能被点播导入接受的站点数。
+// 口径与 internal/shell.collectVodSites 一致：cms（须有 api 地址）/
+// http / js / jar 引擎的站点算支持，其余（xpath/python/未知格式）不算。
+// 这里不建 provider：js/jar 构造失败的极少数会在导入时再被滤掉，
+// 导入时的硬性把关是 ImportVodSource 的 0 站点拒绝。
+func CountSupportedSites(cfgs []*Config) int {
+	n := 0
+	for _, cfg := range cfgs {
+		if cfg == nil {
+			continue
+		}
+		for _, s := range cfg.Sites {
+			kind, _ := Classify(s)
+			switch kind {
+			case "cms":
+				if s.API != "" {
+					n++
+				}
+			case "http", "js", "jar":
+				n++
+			}
+		}
+	}
+	return n
+}

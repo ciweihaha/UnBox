@@ -20,10 +20,16 @@ export function isValidCfVodURL(url: string): boolean {
   }
 }
 
-/** CfVodDirectorySource 是点播源目录里的一项：名字 + 地址。 */
+/**
+ * CfVodDirectorySource 是点播源目录里的一项：名字 + 地址。
+ * sites 是后端验证出的支持格式点播站点数：>=0 表示已验证，-1/缺失表示
+ * 未知（拉不到，没验证出来）；sites === 0 表示已证实没有可用站点，
+ * 不进下拉框（resolveCfVodSources 会滤掉）。
+ */
 export interface CfVodDirectorySource {
   name: string
   url: string
+  sites?: number
 }
 
 /** 默认点播源目录地址：用户在 Cloudflare 上维护的源清单。 */
@@ -57,12 +63,15 @@ export function parseCfVodDirectory(value: unknown): CfVodDirectorySource[] {
   const out: CfVodDirectorySource[] = []
   for (const item of list) {
     if (typeof item !== 'object' || item === null) continue
-    const { name, url } = item as { name?: unknown; url?: unknown }
+    const { name, url, sites } = item as { name?: unknown; url?: unknown; sites?: unknown }
     const cleanName = typeof name === 'string' ? name.trim() : ''
     const cleanUrl = typeof url === 'string' ? url.trim() : ''
     if (!cleanName || !isValidCfVodURL(cleanUrl) || seen.has(cleanUrl)) continue
     seen.add(cleanUrl)
-    out.push({ name: cleanName, url: cleanUrl })
+    // 后端给的 sites（已验证的支持站点数）原样透传；缺失表示未知。
+    const entry: CfVodDirectorySource = { name: cleanName, url: cleanUrl }
+    if (typeof sites === 'number') entry.sites = sites
+    out.push(entry)
   }
   return out
 }
@@ -71,12 +80,14 @@ export function parseCfVodDirectory(value: unknown): CfVodDirectorySource[] {
  * resolveCfVodSources 合并目录源与当前正在用的地址：目录里的优先；
  * 当前地址不在目录里时追加一项“正在用的源”，免得下拉框选不中正在用的源；
  * 目录和当前地址都没有时用内置默认源。
+ * 已证实没有可用站点（sites === 0）的目录源不显示；没验证出来
+ * （sites 缺失或 -1）的保留——不断网时不让下拉框变空。
  */
 export function resolveCfVodSources(
   dir: CfVodDirectorySource[],
   currentUrl: string,
 ): CfVodDirectorySource[] {
-  const merged = [...dir]
+  const merged = dir.filter((s) => s.sites !== 0)
   const url = currentUrl.trim()
   if (url && isValidCfVodURL(url) && !merged.some((s) => s.url === url)) {
     merged.push({ name: '正在用的源', url })
