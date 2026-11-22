@@ -1334,6 +1334,11 @@ func (s *ShellService) VodList(site, cat string, page int) (VodListPage, error) 
 // （无加载态、无报错、无重试）。30s 内源站正常都能返回。
 var vodListTimeout = 30 * time.Second
 
+// vodDetailTimeout 是点播详情单次加载的整体上限（与 vodListTimeout 一致取 30s）：
+// 详情可能走规则脚本执行；没有整体上限时调用一直不返回，详情页会一直转圈、
+// 看不到选集/线路（无报错、无重试）。30s 内源站正常都能返回。
+var vodDetailTimeout = 30 * time.Second
+
 // VodListFiltered 带筛选值浏览分类；filters 可为 nil（等价 VodList）。
 func (s *ShellService) VodListFiltered(site, cat string, page int, filters map[string]string) (VodListPage, error) {
 	pv, err := s.vodOf(site)
@@ -1997,8 +2002,13 @@ func (s *ShellService) VodDetail(site, id string) (VodMedia, error) {
 	if err != nil {
 		return VodMedia{}, err
 	}
-	m, err := pv.Detail(context.Background(), id)
+	ctx, cancel := context.WithTimeout(context.Background(), vodDetailTimeout)
+	defer cancel()
+	m, err := pv.Detail(ctx, id)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || ctx.Err() == context.DeadlineExceeded {
+			return VodMedia{}, errors.New("点播详情加载超时：源站响应过慢，请重试或更换站点")
+		}
 		return VodMedia{}, err
 	}
 	vm := VodMedia{
@@ -2042,7 +2052,11 @@ func (s *ShellService) PreloadVod(site, epID string) (playback.Plan, error) {
 	if err != nil {
 		return playback.Plan{}, err
 	}
-	stream, err := pv.Resolve(context.Background(), epID)
+	// 预载也要有整体上限：前端会 await 它，规则脚本死循环时没有上限
+	// 会一直挂住预载调用。
+	resolveCtx, cancelResolve := context.WithTimeout(context.Background(), vodDetailTimeout)
+	defer cancelResolve()
+	stream, err := pv.Resolve(resolveCtx, epID)
 	if err != nil {
 		return playback.Plan{}, err
 	}
@@ -2074,8 +2088,16 @@ func (s *ShellService) prepareVod(site, epID string, token uint64) (playback.Pla
 	if err != nil {
 		return playback.Plan{}, err
 	}
-	st, err := pv.Resolve(context.Background(), epID)
+	// 解析剧集也要有整体上限：规则脚本死循环时没有上限会一直不返回，
+	// 点播一直播不出来（无报错、无重试）。
+	resolveCtx, cancelResolve := context.WithTimeout(context.Background(), vodDetailTimeout)
+	defer cancelResolve()
+	st, err := pv.Resolve(resolveCtx, epID)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || resolveCtx.Err() == context.DeadlineExceeded {
+			log.Printf("解析点播剧集超时 site=%s ep=%s", site, epID)
+			return playback.Plan{}, errors.New("解析点播剧集超时：源站响应过慢，请重试或更换站点")
+		}
 		log.Printf("解析点播剧集失败 site=%s ep=%s: %v", site, epID, err)
 		return playback.Plan{}, err
 	}

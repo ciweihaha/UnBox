@@ -145,6 +145,172 @@ function playerContent(flag, id, vipFlags){ var r = req(%q); return JSON.stringi
 	}
 }
 
+// 回归测试：规则脚本纯 JS 死循环时，Detail 也必须在 ctx 超时内返回。
+// 此前只有 BrowseFiltered 装了打断哨兵，Detail/Search/Resolve/Home 都没有；
+// 而 VodDetail 上层传的是 Background（无任何上限），死循环的详情脚本会让
+// 详情页一直转圈、看不到选集/线路（D1 同类症状）。修法与 BrowseFiltered 一致。
+func TestSpiderDetailInterruptsHungRule(t *testing.T) {
+	script := `
+function detail(id) {
+  while (true) {}
+  return {vod_id:id, vod_name:"甲", vod_play_from:"线路一", vod_play_url:"第01集$https://example.com/ep1"};
+}
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(script))
+	}))
+	defer srv.Close()
+	p, err := NewSpider(config.Site{Key: "hung-detail", Type: config.SiteTypeSpider, API: srv.URL + "/rule.js"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(timeout time.Duration) (time.Duration, bool, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			_, err := p.Detail(ctx, "1")
+			done <- err
+		}()
+		start := time.Now()
+		select {
+		case err := <-done:
+			return time.Since(start), false, err
+		case <-time.After(5 * time.Second):
+			return time.Since(start), true, nil
+		}
+	}
+	elapsed, timedOut, err := call(200 * time.Millisecond)
+	if timedOut {
+		t.Fatalf("死循环详情规则未在 5s 内返回（ctx 200ms 应已打断它）")
+	}
+	if err == nil {
+		t.Fatal("死循环详情规则应当在 ctx 超时后报错")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("死循环详情规则耗时 %v，远超 ctx 超时", elapsed)
+	}
+	// 中断不能污染下一次调用：同站再调一次，应为自己的 ctx 超时而失败，
+	// 而不是被上一次残留的中断立刻打断（耗时应接近自己的超时，而非接近 0）。
+	elapsed, timedOut, err = call(200 * time.Millisecond)
+	if timedOut {
+		t.Fatalf("死循环详情规则第二次调用未在 5s 内返回")
+	}
+	if err == nil {
+		t.Fatal("死循环详情规则第二次调用也应当报错")
+	}
+	if elapsed < 50*time.Millisecond {
+		t.Fatalf("死循环详情规则第二次调用耗时仅 %v，疑似被上一次残留的中断立刻打断", elapsed)
+	}
+}
+
+// 回归测试：规则脚本纯 JS 死循环时，Search 也必须在 ctx 超时内返回。
+// 此前 Search 没有打断哨兵：全站搜索给的 12s ctx 只拦得住 req()，
+// 纯 JS 死循环会占着搜索线程不放。
+func TestSpiderSearchInterruptsHungRule(t *testing.T) {
+	script := `
+function search(wd) {
+  while (true) {}
+  return [];
+}
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(script))
+	}))
+	defer srv.Close()
+	p, err := NewSpider(config.Site{Key: "hung-search", Type: config.SiteTypeSpider, API: srv.URL + "/rule.js"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.Search(ctx, "q")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("死循环搜索规则应当在 ctx 超时后报错")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("死循环搜索规则未在 5s 内返回（ctx 200ms 应已打断它）")
+	}
+}
+
+// 回归测试：规则脚本纯 JS 死循环时，Resolve（播放解析）也必须在 ctx 超时内返回。
+func TestSpiderResolveInterruptsHungRule(t *testing.T) {
+	script := `
+function detail(id){ return {vod_id:id, vod_name:"甲", vod_pic:"", vod_content:"", vod_year:"2026", vod_area:"", vod_play_from:"线路一", vod_play_url:"第01集$https://example.com/ep1"} }
+function playerContent(flag, id, vipFlags){ while (true) {} return JSON.stringify({parse:0, url:"https://example.com/stream.m3u8"}); }
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(script))
+	}))
+	defer srv.Close()
+	p, err := NewSpider(config.Site{Key: "hung-resolve", Type: config.SiteTypeSpider, API: srv.URL + "/rule.js"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 先正常取详情（填充剧集缓存），再用短 ctx 解析播放地址。
+	media, err := p.Detail(context.Background(), "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(media.Episodes) != 1 {
+		t.Fatalf("详情应返回 1 集: %+v", media)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.Resolve(ctx, media.Episodes[0].ID)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("死循环播放规则应当在 ctx 超时后报错")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("死循环播放规则未在 5s 内返回（ctx 200ms 应已打断它）")
+	}
+}
+
+// 回归测试：规则脚本纯 JS 死循环时，Home 也必须在 ctx 超时内返回。
+func TestSpiderHomeInterruptsHungRule(t *testing.T) {
+	script := `
+function home() {
+  while (true) {}
+  return [];
+}
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(script))
+	}))
+	defer srv.Close()
+	p, err := NewSpider(config.Site{Key: "hung-home", Type: config.SiteTypeSpider, API: srv.URL + "/rule.js"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.Home(ctx)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("死循环首页规则应当在 ctx 超时后报错")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("死循环首页规则未在 5s 内返回（ctx 200ms 应已打断它）")
+	}
+}
+
 // 回归测试（第 1 项）：规则脚本纯 JS 死循环（不经过 req）时，BrowseFiltered
 // 也必须在 ctx 超时内返回，而不是让点播列表一直空白。修法：ctx 取消时打断
 // goja 执行；调用结束后再清中断标记，避免残留中断污染下一次调用。

@@ -100,6 +100,11 @@ func isDrpyEngineLib(raw string) bool {
 func (p *Spider) ensureLoaded(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// 打断哨兵只在持锁期间装：引擎是共享的，锁外装哨兵会让一个已取消 ctx
+	// 的并发调用打断正在执行的另一个调用（第 14 轮并发测试的教训）。
+	// 加载脚本本身也执行顶层 JS，同样需要哨兵覆盖。
+	stopWatch := p.interruptOnCancel(ctx)
+	defer stopWatch()
 	// 加载脚本也可能执行顶层 JS（含 req），本次调用的 ctx 必须在持锁期间绑定，
 	// 否则并发调用会让加载读到别人那次调用的 ctx。
 	p.engine.SetContext(ctx)
@@ -121,6 +126,10 @@ func (p *Spider) Home(ctx context.Context) ([]provider.Section, error) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// 打断哨兵覆盖首页执行全程（脚本加载阶段由 ensureLoaded 内的哨兵覆盖）：
+	// 纯 JS 死循环不经过 req()，光靠 HTTP 超时和上层的整体超时都拦不住它。
+	stopWatch := p.interruptOnCancel(ctx)
+	defer stopWatch()
 	// ctx 必须在持锁期间绑定：SetContext 在锁外时，并发的另一次调用会改掉它，
 	// 让执行中的 req() 读到别人的 ctx（别人结束时一 cancel，本次请求就跟着失败）。
 	p.engine.SetContext(ctx)
@@ -157,6 +166,15 @@ func (p *Spider) Home(ctx context.Context) ([]provider.Section, error) {
 			sections = append(sections, provider.Section{ID: id, Title: name})
 		}
 		return p.attachFilters(sections), nil
+	}
+	// ctx 已超时/取消时不再往 VodHome 回退：打断哨兵是一次性的，VodClasses
+	// 里打断 home() 消费掉之后，再调 VodHome 会重新进入死循环的 home()，
+	// 而哨兵不会再打断第二次。直接按分类错误返回。
+	if ctx.Err() != nil {
+		if classesErr != nil {
+			return nil, classesErr
+		}
+		return nil, ctx.Err()
 	}
 	vods, err := p.engine.VodHome()
 	if err != nil {
@@ -248,15 +266,16 @@ func (p *Spider) interruptOnCancel(ctx context.Context) func() {
 }
 
 func (p *Spider) BrowseFiltered(ctx context.Context, cat string, page int, filters map[string]string) (provider.Page, error) {
-	// 打断哨兵覆盖脚本加载与分类执行全程：纯 JS 死循环不经过 req()，
-	// 光靠 HTTP 超时和上层的整体超时都拦不住它，点播列表会一直空白。
-	stopWatch := p.interruptOnCancel(ctx)
-	defer stopWatch()
 	if err := p.ensureLoaded(ctx); err != nil {
 		return provider.Page{}, err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// 打断哨兵覆盖分类执行全程（脚本加载阶段由 ensureLoaded 内的哨兵覆盖）：
+	// 纯 JS 死循环不经过 req()，光靠 HTTP 超时和上层的整体超时都拦不住它，
+	// 点播列表会一直空白。
+	stopWatch := p.interruptOnCancel(ctx)
+	defer stopWatch()
 	p.engine.SetContext(ctx)
 	if err := p.engine.Init(); err != nil {
 		return provider.Page{}, err
@@ -274,6 +293,10 @@ func (p *Spider) Search(ctx context.Context, q string) ([]provider.Item, error) 
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// 打断哨兵覆盖搜索执行全程（脚本加载阶段由 ensureLoaded 内的哨兵覆盖）：
+	// 纯 JS 死循环不经过 req()，光靠 HTTP 超时和上层的整体超时都拦不住它。
+	stopWatch := p.interruptOnCancel(ctx)
+	defer stopWatch()
 	p.engine.SetContext(ctx)
 	if err := p.engine.Init(); err != nil {
 		return nil, err
@@ -291,6 +314,11 @@ func (p *Spider) Detail(ctx context.Context, id string) (provider.Media, error) 
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// 打断哨兵覆盖详情执行全程（脚本加载阶段由 ensureLoaded 内的哨兵覆盖）：
+	// 纯 JS 死循环不经过 req()，光靠 HTTP 超时和上层的整体超时都拦不住它，
+	// 详情页会一直转圈、看不到选集/线路。
+	stopWatch := p.interruptOnCancel(ctx)
+	defer stopWatch()
 	p.engine.SetContext(ctx)
 	if err := p.engine.Init(); err != nil {
 		return provider.Media{}, err
@@ -332,6 +360,12 @@ func (p *Spider) Resolve(ctx context.Context, epID string) (player.Stream, error
 		}
 	}
 	p.mu.Lock()
+	// 打断哨兵覆盖播放解析执行（脚本加载阶段由 ensureLoaded 内的哨兵覆盖，
+	// 缓存未命中时走的内层 Detail 自己也会装哨兵；它返回后本层不再执行 JS，
+	// 不会踩到内层清中断标记的竞态）：
+	// 纯 JS 死循环不经过 req()，光靠 HTTP 超时和上层的整体超时都拦不住它。
+	stopWatch := p.interruptOnCancel(ctx)
+	defer stopWatch()
 	// Resolve 此前完全不调 SetContext：VodPlay 里 JS 的 req() 用的是上次调用
 	// 残留的 ctx，可能是已取消的搜索 ctx；本次的 ctx 必须在持锁期间绑定。
 	p.engine.SetContext(ctx)

@@ -1285,6 +1285,16 @@ func (p *blockingProbeProvider) Browse(ctx context.Context, cat string, page int
 	return p.BrowseFiltered(ctx, cat, page, nil)
 }
 
+func (p *blockingProbeProvider) Detail(ctx context.Context, _ string) (provider.Media, error) {
+	<-ctx.Done()
+	return provider.Media{}, ctx.Err()
+}
+
+func (p *blockingProbeProvider) Resolve(ctx context.Context, _ string) (player.Stream, error) {
+	<-ctx.Done()
+	return player.Stream{}, ctx.Err()
+}
+
 // 回归测试（第 1 项）：点播列表加载必须有整体超时。源站一直不返回时，
 // 此前 VodListFiltered 用 Background、无任何上限，点播页会一直空白
 // （无加载态、无报错、无重试）；修好后应在超时内返回并说明超时。
@@ -1305,6 +1315,51 @@ func TestVodListFilteredTimesOut(t *testing.T) {
 	}
 	if elapsed > 5*time.Second {
 		t.Fatalf("VodListFiltered 超时耗时 %v，远超整体超时", elapsed)
+	}
+}
+
+// 回归测试：点播详情加载必须有整体超时。源站一直不返回时，此前 VodDetail
+// 用 Background、无任何上限，详情页会一直转圈、看不到选集/线路（D1 同类症状）；
+// 修好后应在超时内返回并说明超时。
+func TestVodDetailTimesOut(t *testing.T) {
+	svc := NewShellService(nil, nil, nil)
+	svc.vods = map[string]provider.Provider{"slow": &blockingProbeProvider{}}
+	old := vodDetailTimeout
+	vodDetailTimeout = 50 * time.Millisecond
+	defer func() { vodDetailTimeout = old }()
+	start := time.Now()
+	_, err := svc.VodDetail("slow", "1")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("永远不返回的源站应当超时报错")
+	}
+	if !strings.Contains(err.Error(), "超时") {
+		t.Fatalf("超时报错应说明超时，实际: %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("VodDetail 超时耗时 %v，远超整体超时", elapsed)
+	}
+}
+
+// 回归测试：点播播放准备里的剧集解析必须有整体超时。源站一直不返回时，
+// 此前 prepareVod 用 Background 解析，点播会一直播不出来（无报错、无重试）。
+func TestPrepareVodResolveTimesOut(t *testing.T) {
+	svc := NewShellService(nil, nil, nil)
+	svc.vods = map[string]provider.Provider{"slow": &blockingProbeProvider{}}
+	old := vodDetailTimeout
+	vodDetailTimeout = 50 * time.Millisecond
+	defer func() { vodDetailTimeout = old }()
+	start := time.Now()
+	_, err := svc.PrepareVod("slow", "1/0/0")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("永远不返回的源站应当超时报错")
+	}
+	if !strings.Contains(err.Error(), "超时") {
+		t.Fatalf("超时报错应说明超时，实际: %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("PrepareVod 解析超时耗时 %v，远超整体超时", elapsed)
 	}
 }
 

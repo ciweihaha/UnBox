@@ -6,8 +6,8 @@ go 1.27.4
 // 上游 go.mod 是剪裁过的，`go mod tidy` 会删掉这些钉、版本回落；不要直接跑 tidy，跑之前先备份 go.mod/go.sum。
 
 require (
-	github.com/PuerkitoBio/goquery v1.13.0
-	github.com/dop251/goja v0.0.0-20261110204830-f493a2b600d6
+	github.com/PuerkitoBio/goquery v1.14.0
+	github.com/dop251/goja v0.0.0-20261121162556-79d6ad37b976
 	github.com/wailsapp/wails/v3 v3.1.0
 	golang.org/x/sync v0.25.0
 	golang.org/x/text v0.44.0

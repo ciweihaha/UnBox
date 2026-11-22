@@ -394,7 +394,9 @@ describe('详情上下两栏严格等高契约', () => {
 describe('更多类似内容收窄契约', () => {
   // 2026-11-19：类似内容那一栏不要搞那么高，卡片收窄、行距收紧。
   it('类似内容卡片比首页行小一圈、行内边距收紧', () => {
-    expect(stylesheet).toMatch(/\.vod-similar \.netflix-row \.content-card\s*\{[^}]*width:\s*120px;/s)
+    // 卡片宽是钉死的 120px !important（第六轮：grid 拉伸会忽略普通 width，
+    // 实测卡片曾被撑到 151px）；断言放宽到允许 !important，别把钉死当违规。
+    expect(stylesheet).toMatch(/\.vod-similar \.netflix-row \.content-card\s*\{[^}]*width:\s*120px(\s*!important)?;/s)
     expect(stylesheet).toMatch(/\.vod-similar \.netflix-row\.content-card-grid\s*\{[^}]*gap:\s*0\.4rem;/s)
   })
 })
