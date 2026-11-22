@@ -1541,6 +1541,7 @@ func (s *ShellService) vodSearchAll(q string, token uint64) ([]VodItem, error) {
 	var out []VodItem
 	var done atomic.Int64
 	var failed atomic.Int64
+	var skipped atomic.Int64
 	var inflight atomic.Int64
 	var wg sync.WaitGroup
 	for _, p := range providers {
@@ -1552,6 +1553,7 @@ func (s *ShellService) vodSearchAll(q string, token uint64) ([]VodItem, error) {
 			defer func() {
 				if r := recover(); r != nil {
 					log.Printf("全站搜索站点 %q 内部错误，已跳过: %v", site, r)
+					failed.Add(1)
 					n := int(done.Add(1))
 					s.emitSearchProgress(searchID, token, q, Progress{Stage: "search", Message: fmt.Sprintf("%d/%d · %s 异常跳过", n, total, displaySiteName(site)), Done: n, Total: total})
 				}
@@ -1563,6 +1565,7 @@ func (s *ShellService) vodSearchAll(q string, token uint64) ([]VodItem, error) {
 				return
 			}
 			if s.searchSiteSkipped(site, time.Now()) { // 上次超时，短时内不再白等
+				skipped.Add(1)
 				n := int(done.Add(1))
 				emitProgress(Progress{Stage: "search", Message: fmt.Sprintf("%d/%d · 跳过 %s（上次超时）", n, total, displaySiteName(site)), Done: n, Total: total})
 				return
@@ -1610,6 +1613,14 @@ func (s *ShellService) vodSearchAll(q string, token uint64) ([]VodItem, error) {
 	wg.Wait()
 	// 名单落盘：应用重启后第一次全站搜索也能直接跳过这批死站点。
 	s.saveSearchDeadSites()
+
+	// 一个结果都没有、且所有站点都失败或被跳过时，不能静默返回空列表：
+	// 前端会把它当成“搜不到这部片”显示“暂无搜索结果”，用户看不到任何
+	// 错误、也不知道可以重试（D1 实测：首搜 2 条、之后 7 次全 0 结果，
+	// 接口直探明明有结果）。有结果时失败站点不影响整体，照常返回。
+	if len(out) == 0 && (failed.Load() > 0 || skipped.Load() > 0) {
+		return nil, fmt.Errorf("搜索失败：%d 个站点失败、%d 个站点因上次超时被跳过，请检查网络后重试", failed.Load(), skipped.Load())
+	}
 
 	s.mu.Lock()
 	if s.searchSeq == searchID {

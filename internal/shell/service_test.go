@@ -1183,6 +1183,53 @@ func TestVodSearchAllBindsPerSiteTimeout(t *testing.T) {
 	}
 }
 
+// 回归测试（D1 同类症状）：全站搜索一个结果都没有、且所有站点都失败或
+// 被跳过时，不能再静默返回空列表——前端会把它当成“搜不到这部片”显示
+// “暂无搜索结果”，用户看不到任何错误、也不知道可以重试；应返回明确报错。
+func TestVodSearchAllErrorsWhenAllSitesFail(t *testing.T) {
+	svc := NewShellService(nil, nil, nil)
+	svc.vods = map[string]provider.Provider{
+		"坏站点": errSearchProvider{err: errors.New("规则解析失败")},
+		"崩溃":  panicProvider{},
+	}
+	items, err := svc.VodSearchAll("小城良方")
+	if err == nil {
+		t.Fatal("所有站点都失败时应返回报错，而不是静默空列表")
+	}
+	if !strings.Contains(err.Error(), "失败") {
+		t.Fatalf("报错应说明站点失败，实际: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("所有站点失败时不应有结果，got %d", len(items))
+	}
+}
+
+// 回归测试：全站搜索一个结果都没有、且所有站点都因上次超时被跳过时，
+// 同样不能静默返回空列表；应报错说明站点被跳过、提示稍后重试。
+func TestVodSearchAllErrorsWhenAllSitesSkipped(t *testing.T) {
+	oldTimeout := siteSearchTimeout
+	siteSearchTimeout = 50 * time.Millisecond
+	defer func() { siteSearchTimeout = oldTimeout }()
+
+	svc := NewShellService(nil, nil, nil)
+	svc.vods = map[string]provider.Provider{"慢站点": slowSearchProvider{delay: time.Second}}
+	if _, err := svc.VodSearchAll("q"); err == nil {
+		t.Fatal("超时站点失败时应返回报错，而不是静默空列表")
+	}
+	// 紧接着的第二次搜索：慢站点在跳过名单里，应直接报错、不再白等。
+	start := time.Now()
+	_, err := svc.VodSearchAll("q")
+	if err == nil {
+		t.Fatal("所有站点被跳过时应返回报错，而不是静默空列表")
+	}
+	if !strings.Contains(err.Error(), "跳过") {
+		t.Fatalf("报错应说明站点被跳过，实际: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 300*time.Millisecond {
+		t.Fatalf("超时站点应在后续搜索中短时跳过，实际耗时 %s", elapsed)
+	}
+}
+
 // 743 个站点里大半是死站点，每次启动第一次搜索都要重罚一遍；名单必须落盘。
 func TestSearchDeadSitesSurviveRestart(t *testing.T) {
 	oldTimeout := siteSearchTimeout
@@ -1197,16 +1244,18 @@ func TestSearchDeadSitesSurviveRestart(t *testing.T) {
 
 	svc := NewShellService(nil, nil, st)
 	svc.vods = map[string]provider.Provider{"慢站点": slowSearchProvider{delay: time.Second}}
-	if _, err := svc.VodSearchAll("q"); err != nil {
-		t.Fatal(err)
+	// 唯一站点超时失败、0 结果：应报错（而不是静默空列表），名单同时落盘。
+	if _, err := svc.VodSearchAll("q"); err == nil {
+		t.Fatal("唯一站点超时失败时应返回报错")
 	}
 
 	// 模拟重启：新服务实例，同一份 store。
 	rebooted := NewShellService(nil, nil, st)
 	rebooted.vods = map[string]provider.Provider{"慢站点": slowSearchProvider{delay: time.Second}}
 	start := time.Now()
-	if _, err := rebooted.VodSearchAll("q"); err != nil {
-		t.Fatal(err)
+	// 重启后第一次搜索：死站点直接跳过，0 结果、应报错说明被跳过。
+	if _, err := rebooted.VodSearchAll("q"); err == nil {
+		t.Fatal("死站点被跳过、0 结果时应返回报错")
 	}
 	if elapsed := time.Since(start); elapsed > 30*time.Millisecond {
 		t.Fatalf("死站点名单应在重启后保留并直接跳过，实际耗时 %s", elapsed)
