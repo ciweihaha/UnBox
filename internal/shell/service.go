@@ -1368,8 +1368,15 @@ func (s *ShellService) VodSearch(site, q string) ([]VodItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	items, err := pv.Search(context.Background(), q)
+	// 单站搜索与全站搜索里单个站点的预算一致（siteSearchTimeout）：规则脚
+	// 本可能长时间执行，没有整体上限时调用一直不返回，点播搜索页会一直转圈。
+	ctx, cancel := context.WithTimeout(context.Background(), siteSearchTimeout)
+	defer cancel()
+	items, err := pv.Search(ctx, q)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || ctx.Err() == context.DeadlineExceeded {
+			return nil, errors.New("点播搜索超时：源站响应过慢，请重试或更换站点")
+		}
 		return nil, err
 	}
 	return toVodItems(items), nil

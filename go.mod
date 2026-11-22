@@ -7,11 +7,11 @@ go 1.27.4
 
 require (
 	github.com/PuerkitoBio/goquery v1.14.0
-	github.com/dop251/goja v0.0.0-20261121162556-79d6ad37b976
+	github.com/dop251/goja v0.0.0-20261122121755-dcce7f63c23a
 	github.com/wailsapp/wails/v3 v3.1.0
 	golang.org/x/sync v0.25.0
 	golang.org/x/text v0.44.0
-	modernc.org/sqlite v1.62.0
+	modernc.org/sqlite v1.63.0
 )
 
 require (
@@ -168,7 +168,7 @@ require (
 	golang.org/x/crypto v0.59.0 // indirect
 	golang.org/x/exp v0.0.0-20261109185158-a52e3aef5920 // indirect
 	golang.org/x/image v0.48.0 // indirect
-	golang.org/x/net v0.62.0 // indirect
+	golang.org/x/net v0.63.0 // indirect
 	golang.org/x/oauth2 v0.38.0 // indirect
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/telemetry v0.0.0-20261111153349-cdaf7e97dd7b // indirect

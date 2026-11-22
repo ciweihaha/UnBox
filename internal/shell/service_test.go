@@ -1295,6 +1295,11 @@ func (p *blockingProbeProvider) Resolve(ctx context.Context, _ string) (player.S
 	return player.Stream{}, ctx.Err()
 }
 
+func (p *blockingProbeProvider) Search(ctx context.Context, _ string) ([]provider.Item, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 // 回归测试（第 1 项）：点播列表加载必须有整体超时。源站一直不返回时，
 // 此前 VodListFiltered 用 Background、无任何上限，点播页会一直空白
 // （无加载态、无报错、无重试）；修好后应在超时内返回并说明超时。
@@ -1360,6 +1365,29 @@ func TestPrepareVodResolveTimesOut(t *testing.T) {
 	}
 	if elapsed > 5*time.Second {
 		t.Fatalf("PrepareVod 解析超时耗时 %v，远超整体超时", elapsed)
+	}
+}
+
+// 回归测试：单站搜索必须有整体超时。源站一直不返回时，此前 VodSearch
+// 用 Background、无任何上限，点播搜索页会一直转圈（无报错、无重试）；
+// 修好后应在超时内返回并说明超时。
+func TestVodSearchTimesOut(t *testing.T) {
+	svc := NewShellService(nil, nil, nil)
+	svc.vods = map[string]provider.Provider{"slow": &blockingProbeProvider{}}
+	old := siteSearchTimeout
+	siteSearchTimeout = 50 * time.Millisecond
+	defer func() { siteSearchTimeout = old }()
+	start := time.Now()
+	_, err := svc.VodSearch("slow", "小城良方")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("永远不返回的源站应当超时报错")
+	}
+	if !strings.Contains(err.Error(), "超时") {
+		t.Fatalf("超时报错应说明超时，实际: %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("VodSearch 超时耗时 %v，远超整体超时", elapsed)
 	}
 }
 
