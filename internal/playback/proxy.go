@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/unbox/unbox/internal/httpx"
 	"github.com/unbox/unbox/internal/player"
 )
 
@@ -71,8 +72,12 @@ func NewProxy(client *http.Client, ttl time.Duration) *Proxy {
 
 // newStreamTransport 返回只对建连/握手/响应头设超时的 Transport，避免用
 // 整体 Timeout 把长播放流中途掐断。
+// 代理走 httpx.ProxyForRequest（环境变量优先，其次 Windows 系统代理）：
+// 之前这里没配 Proxy，直播分片永远直连，笔记本直连只有约 20B/s 时
+// 播不起来（D3）；走本机代理 2.6 秒就通。
 func newStreamTransport() *http.Transport {
 	return &http.Transport{
+		Proxy:                 httpx.ProxyForRequest,
 		DialContext:           (&net.Dialer{Timeout: streamDialTimeout}).DialContext,
 		TLSHandshakeTimeout:   streamTLSHandshake,
 		ResponseHeaderTimeout: streamRespHeader,

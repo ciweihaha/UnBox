@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/unbox/unbox/internal/httpx"
 )
 
 const (
@@ -24,9 +26,12 @@ type Client struct {
 }
 
 // NewClient 构造客户端；headers 可为 nil。
+// 传输层走 httpx.NewTransport：与 CMS 客户端同一套代理选择
+// （环境变量优先，其次 Windows 系统代理），规则站搜索不再因
+// 本机代理没配环境变量而直连慢路。
 func NewClient(headers map[string]string) *Client {
 	return &Client{
-		hc:      &http.Client{Timeout: 15 * time.Second},
+		hc:      &http.Client{Timeout: 15 * time.Second, Transport: httpx.NewTransport(15 * time.Second)},
 		headers: headers,
 		cookies: map[string]string{},
 	}

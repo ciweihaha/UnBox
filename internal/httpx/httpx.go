@@ -79,6 +79,21 @@ func normalizeHost(host string) string {
 	return h
 }
 
+func NewTransport(timeout time.Duration) *http.Transport {
+	return &http.Transport{
+		// 系统代理也要走：桌面双击启动没有 HTTP_PROXY 环境变量，
+		// 只认环境变量会让本机代理（v2rayN）形同虚设，见 ProxyForRequest。
+		Proxy:                 ProxyForRequest,
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          64,
+		MaxIdleConnsPerHost:   8,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   timeout,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+}
+
 // NewClient 返回带显式传输层配置的客户端。
 //
 // 直接写 &http.Client{Timeout: d} 会用 http.DefaultTransport，它的
@@ -87,17 +102,8 @@ func normalizeHost(host string) string {
 // 上的慢握手被提前掐断。
 func NewClient(timeout time.Duration) *http.Client {
 	return &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
-			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-			ForceAttemptHTTP2:     true,
-			MaxIdleConns:          64,
-			MaxIdleConnsPerHost:   8,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   timeout,
-			ExpectContinueTimeout: 1 * time.Second,
-		},
+		Timeout:   timeout,
+		Transport: NewTransport(timeout),
 	}
 }
 

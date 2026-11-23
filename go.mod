@@ -7,7 +7,7 @@ go 1.27.4
 
 require (
 	github.com/PuerkitoBio/goquery v1.14.0
-	github.com/dop251/goja v0.0.0-20261122121755-dcce7f63c23a
+	github.com/dop251/goja v0.0.0-20261122185237-35fdc4b88e39
 	github.com/wailsapp/wails/v3 v3.1.0
 	golang.org/x/sync v0.25.0
 	golang.org/x/text v0.44.0
