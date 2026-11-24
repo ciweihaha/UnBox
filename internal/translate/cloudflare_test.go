@@ -6,10 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/unbox/unbox/internal/httpx"
 )
 
 // mockWorkersAI 模拟 Cloudflare Workers AI 的翻译接口：记录请求，返回固定译文。
@@ -165,5 +168,42 @@ func TestCFCheckMissingCredentials(t *testing.T) {
 	c := NewCFClient("", "", "", 5*time.Second)
 	if err := c.Check(context.Background()); err == nil {
 		t.Fatalf("Check 成功，想要错误（账号与令牌为空）")
+	}
+}
+
+// TestCFTranslateUsesEnvProxy：与 Azure 同理，Workers AI 翻译也要走统一代理选择。
+func TestCFTranslateUsesEnvProxy(t *testing.T) {
+	c := NewCFClient("test-acct", "test-token", "http://cf-test.invalid", 5*time.Second)
+	tr, ok := c.http.Transport.(*http.Transport)
+	if !ok || tr == nil {
+		t.Fatalf("Cloudflare 客户端没有显式传输层（Transport = %v）", c.http.Transport)
+	}
+	if reflect.ValueOf(tr.Proxy).Pointer() != reflect.ValueOf(httpx.ProxyForRequest).Pointer() {
+		t.Fatalf("Cloudflare 客户端没走统一代理选择函数 httpx.ProxyForRequest")
+	}
+
+	// 行为烟囱：经环境变量代理拿到译文。
+	var viaProxy atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		viaProxy.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"result":  map[string]any{"translated_text": "你好，世界"},
+			"errors":  []any{},
+		})
+	}))
+	defer proxy.Close()
+	setTranslateTestProxyEnv(t, proxy.URL)
+
+	got, err := c.Translate(context.Background(), "Hello, world")
+	if err != nil {
+		t.Fatalf("Translate 报错: %v", err)
+	}
+	if got != "你好，世界" {
+		t.Fatalf("Translate = %q，想要 %q", got, "你好，世界")
+	}
+	if viaProxy.Load() != 1 {
+		t.Fatalf("经代理的请求次数 = %d，想要 1", viaProxy.Load())
 	}
 }

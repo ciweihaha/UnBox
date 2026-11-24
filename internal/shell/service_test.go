@@ -9,8 +9,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1534,5 +1536,63 @@ func TestCompareVersion(t *testing.T) {
 		if got := compareVersion(c.a, c.b); got != c.want {
 			t.Errorf("compareVersion(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
 		}
+	}
+}
+
+// TestShellServiceHTTPClientUsesEnvProxy：点播源目录拉取走外网，必须经统一
+// 代理选择，否则只改系统代理（v2rayN）的桌面启动方式下直连慢路。
+// Linux 上裸客户端的 DefaultTransport 本来就认环境变量，行为测不出差别，
+// 真正的差别在 Windows 系统代理，所以这里钉接线：传输层的 Proxy 必须是
+// 统一选择函数 httpx.ProxyForRequest。
+func TestShellServiceHTTPClientUsesEnvProxy(t *testing.T) {
+	svc := NewShellService(nil, nil, nil)
+	tr, ok := svc.httpClient.Transport.(*http.Transport)
+	if !ok || tr == nil {
+		t.Fatalf("ShellService 没有显式传输层（Transport = %v）", svc.httpClient.Transport)
+	}
+	if reflect.ValueOf(tr.Proxy).Pointer() != reflect.ValueOf(httpx.ProxyForRequest).Pointer() {
+		t.Fatalf("ShellService 没走统一代理选择函数 httpx.ProxyForRequest")
+	}
+}
+
+// TestCheckUpdateUsesEnvProxy：检查更新走外网（github.com），必须经统一
+// 代理选择，否则只改系统代理的桌面启动方式下请求直连慢路、10 秒超时失败。
+// 用本地代理桩 + 本地目标站验证整条 CheckUpdate 路径确实经过代理。
+func TestCheckUpdateUsesEnvProxy(t *testing.T) {
+	tagSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("<html>release</html>"))
+	}))
+	defer tagSrv.Close()
+	var viaProxy atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		viaProxy.Add(1)
+		http.Redirect(w, r, tagSrv.URL+"/releases/tag/v9.9.9", http.StatusFound)
+	}))
+	defer proxy.Close()
+
+	oldPage, oldAPI := updatePageURL, updateURL
+	updatePageURL = "http://update-test.invalid/releases/latest"
+	updateURL = "http://update-test.invalid/api"
+	defer func() { updatePageURL, updateURL = oldPage, oldAPI }()
+
+	t.Setenv("HTTP_PROXY", proxy.URL)
+	t.Setenv("http_proxy", proxy.URL)
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("https_proxy", "")
+	t.Setenv("ALL_PROXY", "")
+	t.Setenv("all_proxy", "")
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
+
+	svc := NewShellService(nil, nil, nil)
+	info, err := svc.CheckUpdate()
+	if err != nil {
+		t.Fatalf("CheckUpdate 报错: %v", err)
+	}
+	if info.LatestVersion != "v9.9.9" {
+		t.Fatalf("LatestVersion = %q，想要 v9.9.9", info.LatestVersion)
+	}
+	if viaProxy.Load() != 1 {
+		t.Fatalf("经代理的请求次数 = %d，想要 1", viaProxy.Load())
 	}
 }

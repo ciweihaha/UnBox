@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/unbox/unbox/internal/config"
+	"github.com/unbox/unbox/internal/httpx"
 	"github.com/unbox/unbox/internal/playback"
 	"github.com/unbox/unbox/internal/player"
 	"github.com/unbox/unbox/internal/player/failover"
@@ -124,11 +125,13 @@ const updateRepo = "ciweihaha/UnBox"
 
 // updatePageURL 是最新 release 的网页入口：GitHub 会 302 到 /releases/tag/<tag>，
 // 顺着重定向读 tag 即可，不占 API 配额。
-const updatePageURL = "https://github.com/" + updateRepo + "/releases/latest"
+// 用 var 而不用 const：测试要把它指到本地桩站，验证整条检查更新路径走代理。
+var updatePageURL = "https://github.com/" + updateRepo + "/releases/latest"
 
 // updateURL 是 GitHub 最新 release 的 API 地址，只作网页入口的备用。
 // 未登录的 API 每小时只有 60 次配额，被限流时一律 403。
-const updateURL = "https://api.github.com/repos/" + updateRepo + "/releases/latest"
+// 用 var 而不用 const：测试要把它指到本地桩站，验证整条检查更新路径走代理。
+var updateURL = "https://api.github.com/repos/" + updateRepo + "/releases/latest"
 
 // ChannelInfo 是前端展示用的频道信息。
 type ChannelInfo struct {
@@ -266,8 +269,10 @@ func newShellService(pv provider.Provider, p player.Player, st *store.Store) *Sh
 		mpvPlugin:        manager,
 		vodCategoryCache: make(map[string]vodCategoryCacheEntry),
 		vodCategoryNow:   time.Now,
-		httpClient:       &http.Client{Timeout: 10 * time.Second},
-		now:              time.Now,
+		// 点播源目录走外网：传输层用 httpx.NewClient（环境变量优先，
+		// 其次 Windows 系统代理），不能用裸 http.Client 直连。
+		httpClient: httpx.NewClient(10 * time.Second),
+		now:        time.Now,
 	}
 	svc.loadInsecureTLSHosts()
 	svc.loadSearchDeadSites()
@@ -1821,7 +1826,10 @@ func (s *ShellService) InternalVersion() string {
 // 用户看到的「检查更新失败: HTTP 403」基本都是这个原因。
 func (s *ShellService) CheckUpdate() (UpdateInfo, error) {
 	info := UpdateInfo{CurrentVersion: appVersion}
-	client := &http.Client{Timeout: 10 * time.Second}
+	// 检查更新走外网（github.com）：传输层用 httpx.NewClient
+	// （环境变量优先，其次 Windows 系统代理），不能用裸 http.Client 直连——
+	// 只改系统代理的桌面启动方式下，直连慢路会在 10 秒超时里失败。
+	client := httpx.NewClient(10 * time.Second)
 
 	tag, htmlURL, found, redirectErr := latestReleaseByRedirect(client, updatePageURL)
 	if redirectErr != nil || !found {

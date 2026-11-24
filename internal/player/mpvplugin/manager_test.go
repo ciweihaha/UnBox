@@ -3,9 +3,13 @@ package mpvplugin
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"github.com/unbox/unbox/internal/httpx"
 )
 
 func TestManagerStatusPrefersPluginExecutable(t *testing.T) {
@@ -64,5 +68,21 @@ func TestManagerStatusPrefersBundledExecutable(t *testing.T) {
 	got := m.Status()
 	if !got.Available || got.Path != bundled {
 		t.Fatalf("Status = %+v, want bundled %q", got, bundled)
+	}
+}
+
+// TestNewManagerClientUsesEnvProxy：Windows 上自动下载 mpv 安装包走外网，
+// 必须经统一代理选择，否则只改系统代理（v2rayN）的桌面启动方式下直连慢路。
+// Linux 上裸客户端的 DefaultTransport 本来就认环境变量，行为测不出差别，
+// 真正的差别在 Windows 系统代理，所以这里钉接线：传输层的 Proxy 必须是
+// 统一选择函数 httpx.ProxyForRequest。
+func TestNewManagerClientUsesEnvProxy(t *testing.T) {
+	m := newManager("windows", t.TempDir(), func(string) (string, error) { return "", errors.New("missing") })
+	tr, ok := m.client.Transport.(*http.Transport)
+	if !ok || tr == nil {
+		t.Fatalf("mpv 下载客户端没有显式传输层（Transport = %v）", m.client.Transport)
+	}
+	if reflect.ValueOf(tr.Proxy).Pointer() != reflect.ValueOf(httpx.ProxyForRequest).Pointer() {
+		t.Fatalf("mpv 下载客户端没走统一代理选择函数 httpx.ProxyForRequest")
 	}
 }

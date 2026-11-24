@@ -10,6 +10,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/unbox/unbox/internal/httpx"
 )
 
 // probeTimeout 是单条 URL 的探测超时。
@@ -37,8 +39,11 @@ type Prober struct {
 }
 
 // NewProber 返回默认 Prober（单 URL 超时 1s）。
+// 测速走外网流地址：传输层用 httpx.NewClient（环境变量优先，
+// 其次 Windows 系统代理），不能用裸 http.Client 直连——
+// 2026-11-22 笔记本实测直连只有约 20B/s，备用源全判死。
 func NewProber() *Prober {
-	return &Prober{Client: &http.Client{Timeout: probeTimeout}}
+	return &Prober{Client: httpx.NewClient(probeTimeout)}
 }
 
 // Probe 测量单个 URL：GET 请求，读至多 sampleBytes 字节，统计首字节延迟与吞吐。

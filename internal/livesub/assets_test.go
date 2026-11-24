@@ -4,13 +4,18 @@ package livesub
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
+	"sync/atomic"
 	"testing"
+
+	"github.com/unbox/unbox/internal/httpx"
 )
 
 func TestEnsureAssets_DownloadsAndCaches(t *testing.T) {
@@ -115,5 +120,48 @@ func TestEnsureAssets_AllURLsFail(t *testing.T) {
 	dir := t.TempDir()
 	if err := downloadFile(t.Context(), dir, "f.bin", []string{"http://127.0.0.1:1/nope"}, nil); err == nil {
 		t.Fatal("全部地址失败时应返回错误")
+	}
+}
+
+// TestDownloadClientUsesEnvProxy：模型/程序下载走外网，必须经统一代理选择，
+// 否则只改系统代理（v2rayN）的桌面启动方式下下载直连慢路。
+// Linux 上裸客户端的 DefaultTransport 本来就认环境变量，行为测不出差别，
+// 真正的差别在 Windows 系统代理，所以这里钉接线：传输层的 Proxy 必须是
+// 统一选择函数 httpx.ProxyForRequest。
+func TestDownloadClientUsesEnvProxy(t *testing.T) {
+	tr, ok := downloadClient.Transport.(*http.Transport)
+	if !ok || tr == nil {
+		t.Fatalf("下载客户端没有显式传输层（Transport = %v）", downloadClient.Transport)
+	}
+	if reflect.ValueOf(tr.Proxy).Pointer() != reflect.ValueOf(httpx.ProxyForRequest).Pointer() {
+		t.Fatalf("下载客户端没走统一代理选择函数 httpx.ProxyForRequest")
+	}
+
+	// 行为烟囱：经环境变量代理下载到一个直连 DNS 失败的地址。
+	var viaProxy atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		viaProxy.Add(1)
+		_, _ = w.Write([]byte("fake-model-bytes"))
+	}))
+	defer proxy.Close()
+	t.Setenv("HTTP_PROXY", proxy.URL)
+	t.Setenv("http_proxy", proxy.URL)
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("https_proxy", "")
+	t.Setenv("ALL_PROXY", "")
+	t.Setenv("all_proxy", "")
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
+
+	dest := filepath.Join(t.TempDir(), "f.bin")
+	if err := downloadOne(context.Background(), dest, "http://model-test.invalid/f.bin", nil); err != nil {
+		t.Fatalf("downloadOne 报错: %v", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil || string(got) != "fake-model-bytes" {
+		t.Fatalf("下载内容 = %q / %v，想要 fake-model-bytes", got, err)
+	}
+	if viaProxy.Load() != 1 {
+		t.Fatalf("经代理的请求次数 = %d，想要 1", viaProxy.Load())
 	}
 }

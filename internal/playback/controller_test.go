@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/unbox/unbox/internal/httpx"
 	"github.com/unbox/unbox/internal/player"
 )
 
@@ -392,4 +396,52 @@ func TestControllerPreloadReleaseCancelsWarmup(t *testing.T) {
 	if len(mpv.loaded) != 0 {
 		t.Fatal("预载不得调用共享播放器")
 	}
+}
+
+// TestControllerProbeUsesEnvProxy：预热 Range 请求与 HLS 编码探测都走流地址
+// （外网），必须经统一代理选择，否则笔记本直连慢路时预热失败、HEVC 误判走 Web。
+// Linux 上裸客户端的 DefaultTransport 本来就认环境变量，行为测不出差别，
+// 真正的差别在 Windows 系统代理，所以这里钉接线：传输层的 Proxy 必须是
+// 统一选择函数 httpx.ProxyForRequest。
+func TestControllerProbeUsesEnvProxy(t *testing.T) {
+	c := NewController(nil, nil, nil)
+	tr, ok := c.client.Transport.(*http.Transport)
+	if !ok || tr == nil {
+		t.Fatalf("播放控制器没有显式传输层（Transport = %v）", c.client.Transport)
+	}
+	if reflect.ValueOf(tr.Proxy).Pointer() != reflect.ValueOf(httpx.ProxyForRequest).Pointer() {
+		t.Fatalf("播放控制器没走统一代理选择函数 httpx.ProxyForRequest")
+	}
+
+	// 行为烟囱：经环境变量代理探测到 HEVC 编码。
+	var viaProxy atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		viaProxy.Add(1)
+		fmt.Fprint(w, "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000,CODECS=\"hvc1.1.6.L120.90\"\nhttp://x/low.m3u8\n")
+	}))
+	defer proxy.Close()
+	setControllerTestProxyEnv(t, proxy.URL)
+
+	codec, err := c.probeHLSCodec(context.Background(), player.Stream{URL: "http://probe-test.invalid/live.m3u8"})
+	if err != nil {
+		t.Fatalf("probeHLSCodec 报错: %v", err)
+	}
+	if !strings.Contains(codec, "hvc1") {
+		t.Fatalf("CODECS = %q，想要含 hvc1", codec)
+	}
+	if viaProxy.Load() != 1 {
+		t.Fatalf("经代理的请求次数 = %d，想要 1", viaProxy.Load())
+	}
+}
+
+func setControllerTestProxyEnv(t *testing.T, proxyURL string) {
+	t.Helper()
+	t.Setenv("HTTP_PROXY", proxyURL)
+	t.Setenv("http_proxy", proxyURL)
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("https_proxy", "")
+	t.Setenv("ALL_PROXY", "")
+	t.Setenv("all_proxy", "")
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
 }

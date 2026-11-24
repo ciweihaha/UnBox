@@ -16,6 +16,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/unbox/unbox/internal/httpx"
 )
 
 // DefaultCFModel 是免费接口默认翻译模型：Meta 的多语言翻译模型，
@@ -53,8 +55,10 @@ func NewCFClient(accountID, token, baseURL string, timeout time.Duration) *CFCli
 		token:     strings.TrimSpace(token),
 		model:     DefaultCFModel,
 		baseURL:   strings.TrimRight(baseURL, "/"),
-		http:      &http.Client{Timeout: timeout},
-		cache:     newTranslationCache(),
+		// 翻译走外网 API：传输层用 httpx.NewClient（环境变量优先，
+		// 其次 Windows 系统代理），不能用裸 http.Client 直连。
+		http:  httpx.NewClient(timeout),
+		cache: newTranslationCache(),
 	}
 }
 

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/unbox/unbox/internal/config"
+	"github.com/unbox/unbox/internal/httpx"
 )
 
 // 点播源两种来源。
@@ -130,7 +131,8 @@ func (s *ShellService) FetchCfVodDirectory() ([]CfVodDirectorySource, error) {
 	dirURL := s.GetCfVodDirectoryURL()
 	client := s.httpClient
 	if client == nil {
-		client = http.DefaultClient
+		// 只在测试直接构造、没走 NewShellService 时兜底：同样走统一代理选择。
+		client = httpx.NewClient(cfVodDirectoryValidateTimeout)
 	}
 	resp, err := client.Get(dirURL)
 	if err != nil {

@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/unbox/unbox/internal/httpx"
 )
 
 func TestWhisperClient_Transcribe(t *testing.T) {
@@ -84,5 +87,19 @@ func TestWhisperClient_WaitReadyTimeout(t *testing.T) {
 	c := NewWhisperClient("http://127.0.0.1:1", 50*time.Millisecond)
 	if err := c.WaitReady(t.Context(), 200*time.Millisecond); err == nil {
 		t.Fatal("服务没起时 WaitReady 应超时报错")
+	}
+}
+
+// TestWhisperClientUsesEnvProxy：whisper-server 默认在本机回环上，
+// 代理选择对它直连（回环不进代理），行为不变；这里只钉接线，
+// 保证以后 endpoint 配到远端时也走统一代理，不会悄悄直连。
+func TestWhisperClientUsesEnvProxy(t *testing.T) {
+	c := NewWhisperClient("http://127.0.0.1:17880", time.Second)
+	tr, ok := c.http.Transport.(*http.Transport)
+	if !ok || tr == nil {
+		t.Fatalf("Whisper 客户端没有显式传输层（Transport = %v）", c.http.Transport)
+	}
+	if reflect.ValueOf(tr.Proxy).Pointer() != reflect.ValueOf(httpx.ProxyForRequest).Pointer() {
+		t.Fatalf("Whisper 客户端没走统一代理选择函数 httpx.ProxyForRequest")
 	}
 }

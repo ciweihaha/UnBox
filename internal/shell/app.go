@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -139,10 +140,20 @@ func NewApp(p player.Player, pv provider.Provider, st *store.Store) *application
 	})
 }
 
+// windowTitle 是主窗口标题：带版本号（P01），用户在任务栏/窗口切换里
+// 一眼能确认装的是哪版，不用再进「关于」页查。格式与「关于」页一致，
+// 都是裸版本号（0.9.17，不带 v 前缀）；没注入版本时只显示 UnBox。
+func windowTitle() string {
+	if v := strings.TrimSpace(appVersion); v != "" {
+		return "UnBox " + v
+	}
+	return "UnBox"
+}
+
 // OpenWindow 在 app 上创建并打开主窗口。
 func OpenWindow(app *application.App) *application.WebviewWindow {
 	return app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:            "UnBox",
+		Title:            windowTitle(),
 		Width:            1000,
 		Height:           618,
 		MinWidth:         720,

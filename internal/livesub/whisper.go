@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/unbox/unbox/internal/httpx"
 )
 
 // WhisperClient 调 whisper-server（常驻子进程，模型只加载一次）：
@@ -28,7 +30,9 @@ func NewWhisperClient(endpoint string, timeout time.Duration) *WhisperClient {
 	}
 	return &WhisperClient{
 		endpoint: strings.TrimRight(endpoint, "/"),
-		http:     &http.Client{Timeout: timeout},
+		// whisper-server 默认在本机回环上，代理选择对它直连（回环不进代理），
+		// 行为不变；统一走 httpx 是为以后 endpoint 配到远端时也不直连。
+		http: httpx.NewClient(timeout),
 	}
 }
 

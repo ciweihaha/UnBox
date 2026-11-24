@@ -4,8 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/unbox/unbox/internal/httpx"
 )
 
 func TestProbeReachable(t *testing.T) {
@@ -91,4 +95,55 @@ func TestProbeBoundsTimeout(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 2500*time.Millisecond {
 		t.Fatalf("Probe 未受 1s 探测超时约束，耗时 %v", elapsed)
 	}
+}
+
+// TestProbeUsesEnvProxy：测速必须走代理选择（环境变量优先，其次系统代理），
+// 不能用裸 http.Client 直连。2026-11-22 笔记本实测：直连到 Cloudflare
+// 只有约 20B/s，备用源测速全判死、故障切换无源可选；走本机代理 2.6 秒就通。
+//
+// 注意：Linux 上裸客户端的 DefaultTransport 本来就认环境变量，
+// 行为测试分不出差别；真正的差别在 Windows 系统代理（只改注册表、
+// 不配环境变量时，DefaultTransport 直接直连）。所以这里钉接线：
+// 传输层的 Proxy 必须是统一选择函数 httpx.ProxyForRequest。
+func TestProbeUsesEnvProxy(t *testing.T) {
+	p := NewProber()
+	tr, ok := p.Client.Transport.(*http.Transport)
+	if !ok || tr == nil {
+		t.Fatalf("测速客户端没有显式传输层（Transport = %v），会落到 DefaultTransport 直连", p.Client.Transport)
+	}
+	if reflect.ValueOf(tr.Proxy).Pointer() != reflect.ValueOf(httpx.ProxyForRequest).Pointer() {
+		t.Fatalf("测速客户端没走统一代理选择函数 httpx.ProxyForRequest，系统代理（v2rayN）下会直连慢路")
+	}
+
+	// 行为烟囱：经环境变量代理能测到一个直连 DNS 失败的域名。
+	var viaProxy atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		viaProxy.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(make([]byte, 64*1024))
+	}))
+	defer proxy.Close()
+	setTestProxyEnv(t, proxy.URL)
+
+	r := p.Probe(context.Background(), "http://probe-test.invalid/x", nil)
+	if !r.Reachable || r.Err != nil {
+		t.Fatalf("Probe = %+v，想要经代理可达（请求没走代理时该域名 DNS 失败）", r)
+	}
+	if viaProxy.Load() != 1 {
+		t.Fatalf("经代理的请求次数 = %d，想要 1", viaProxy.Load())
+	}
+}
+
+// setTestProxyEnv 把测试进程的代理环境变量指向本地代理桩，
+// 并清空 NO_PROXY（目标域名不在直连名单里才进代理）。
+func setTestProxyEnv(t *testing.T, proxyURL string) {
+	t.Helper()
+	t.Setenv("HTTP_PROXY", proxyURL)
+	t.Setenv("http_proxy", proxyURL)
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("https_proxy", "")
+	t.Setenv("ALL_PROXY", "")
+	t.Setenv("all_proxy", "")
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
 }

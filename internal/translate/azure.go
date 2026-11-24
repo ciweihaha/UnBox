@@ -16,6 +16,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/unbox/unbox/internal/httpx"
 )
 
 // DefaultAzureTimeout 是免费接口单次调用超时：实时字幕不能等太久，
@@ -48,8 +50,10 @@ func NewAzureClient(key, region, endpoint string, timeout time.Duration) *AzureC
 		key:      strings.TrimSpace(key),
 		region:   strings.TrimSpace(region),
 		endpoint: strings.TrimRight(endpoint, "/"),
-		http:     &http.Client{Timeout: timeout},
-		cache:    newTranslationCache(),
+		// 翻译走外网 API：传输层用 httpx.NewClient（环境变量优先，
+		// 其次 Windows 系统代理），不能用裸 http.Client 直连。
+		http:  httpx.NewClient(timeout),
+		cache: newTranslationCache(),
 	}
 }
 

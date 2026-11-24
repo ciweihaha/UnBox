@@ -71,3 +71,24 @@ func TestSetTitleBarColourResultShape(t *testing.T) {
 		t.Errorf("没有应用实例时不应谎报已生效：%+v", res)
 	}
 }
+
+// P01：标题栏要带版本号，用户在任务栏/窗口切换里一眼能确认装的是哪版，
+// 不用再进「关于」页查。
+func TestWindowTitle(t *testing.T) {
+	old := appVersion
+	defer func() { appVersion = old }()
+
+	appVersion = "0.9.17"
+	if got := windowTitle(); got != "UnBox 0.9.17" {
+		t.Fatalf("windowTitle() = %q，想要 %q", got, "UnBox 0.9.17")
+	}
+	// 未注入版本（本地开发默认）也不留尾巴空格。
+	appVersion = ""
+	if got := windowTitle(); got != "UnBox" {
+		t.Fatalf("windowTitle() = %q，想要 %q", got, "UnBox")
+	}
+	appVersion = "  "
+	if got := windowTitle(); got != "UnBox" {
+		t.Fatalf("windowTitle() = %q，想要 %q", got, "UnBox")
+	}
+}

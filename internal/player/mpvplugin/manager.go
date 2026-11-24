@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/unbox/unbox/internal/httpx"
 	"github.com/unbox/unbox/internal/player"
 	"github.com/unbox/unbox/internal/player/mpvproc"
 )
@@ -69,7 +70,12 @@ func New(goos, root string) *Manager {
 }
 
 func newManager(goos, root string, lookPath func(string) (string, error)) *Manager {
-	return &Manager{goos: goos, root: root, lookPath: lookPath, client: http.DefaultClient, run: func(ctx context.Context, name string, args ...string) error {
+	// mpv 安装包下载走外网：传输层用 httpx（环境变量优先，
+	// 其次 Windows 系统代理），不能用 http.DefaultClient 直连。
+	// 不设 http.Client 整体 Timeout：安装包下载是长耗时流，
+	// 总时限由 installWindows 的 ctx（15 分钟）管。
+	downloadClient := &http.Client{Transport: httpx.NewTransport(30 * time.Second)}
+	return &Manager{goos: goos, root: root, lookPath: lookPath, client: downloadClient, run: func(ctx context.Context, name string, args ...string) error {
 		return exec.CommandContext(ctx, name, args...).Run()
 	}, output: func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		return exec.CommandContext(ctx, name, args...).Output()

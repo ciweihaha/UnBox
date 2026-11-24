@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/unbox/unbox/internal/httpx"
 )
 
 // whisperRelease 是预编译 whisper.cpp 程序的版本（b5454，2026-10-06）：
@@ -22,6 +24,13 @@ const whisperRelease = "b5454"
 // downloadTimeout 是单个文件下载超时：模型 148MB，
 // 云电脑直连 GitHub 慢，放宽到 30 分钟；hf-mirror 正常几分钟下完。
 const downloadTimeout = 30 * time.Minute
+
+// downloadClient 是模型/程序下载客户端：下载是长耗时流，
+// 不能设 http.Client 整体 Timeout（会把下载中途掐断），
+// 只给传输层配代理选择 + 30 秒 TLS 握手上限，总时限由调用方的 ctx 管。
+// 代理走 httpx（环境变量优先，其次 Windows 系统代理），
+// 不能用 http.DefaultClient 直连——只改系统代理的桌面启动方式下直连慢路。
+var downloadClient = &http.Client{Transport: httpx.NewTransport(30 * time.Second)}
 
 // 模型文件名：base.en 准确、tiny.en 更快；
 // 只支持这两个，别的模型名直接报错，别让用户下错文件。
@@ -155,7 +164,7 @@ func downloadOne(ctx context.Context, dest, url string, progress ProgressFunc) e
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := downloadClient.Do(req)
 	if err != nil {
 		return err
 	}

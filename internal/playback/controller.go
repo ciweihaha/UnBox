@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/unbox/unbox/internal/httpx"
 	"github.com/unbox/unbox/internal/player"
 )
 
@@ -77,7 +78,10 @@ func NewController(resolver streamResolver, proxy streamProxy, mpv player.Player
 	return &Controller{
 		resolver: resolver,
 		proxy:    proxy,
-		client:   &http.Client{Timeout: probeTimeout},
+		// 预热与 HLS 编码探测都走外网流地址：传输层用 httpx.NewClient
+		// （环境变量优先，其次 Windows 系统代理），与 resolver.go 的
+		// 探测客户端一致，不能用裸 http.Client 直连。
+		client:   httpx.NewClient(probeTimeout),
 		mpv:      mpv,
 		sessions: make(map[string]playSession),
 		preloads: make(map[string]preloadSession),
